@@ -6,6 +6,7 @@ from agents.kill_switch import KillSwitch
 from agents.circuit_breaker import CircuitBreaker
 from agents.order_prechecker import OrderPreCheckerAgent
 from core.interfaces import IBrokerConnector
+import MetaTrader5 as mt5
 
 class Engine:
     def __init__(self, connector: IBrokerConnector):
@@ -46,6 +47,13 @@ class Engine:
             # Checks de sécurité
             self.circuit_breaker.check()
 
+            # --- Data Feed Test (OHLCV) ---
+            # Récupération des bougies M1 pour EURUSD (5 dernières)
+            df = self.connector.get_historical_data("EURUSD", mt5.TIMEFRAME_M1, 5)
+            if df is not None and not df.empty:
+                last_close = df.iloc[-1]['close']
+                logging.info(f"[Market Data] EURUSD M1 Last Close: {last_close}")
+
             # Placeholder pour l'appel à l'Aggregator et stratégies
             
-            time.sleep(1) # Tick simulation
+            time.sleep(60) # Tick toutes les minutes (simulé)

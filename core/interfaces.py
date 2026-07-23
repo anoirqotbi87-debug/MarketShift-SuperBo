@@ -63,6 +63,11 @@ class IBrokerConnector(ABC):
     def close_position(self, ticket: int) -> bool:
         pass
 
+    @abstractmethod
+    def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[Any]:
+        """Récupère l'historique OHLCV sous forme de DataFrame"""
+        pass
+
 class IStrategy(ABC):
     @abstractmethod
     def analyze(self, symbol: str) -> Optional[Signal]:
