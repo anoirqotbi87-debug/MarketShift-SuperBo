@@ -1,0 +1,355 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .glass-card {
+    background: rgba(30, 41, 59, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    backdrop-filter: blur(12px);
+    transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  
+  .glass-card-hover {
+    transition: all 0.2s ease-in-out;
+  }
+  .glass-card-hover:hover {
+    background: rgba(30, 41, 59, 0.85);
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 0 15px rgba(99, 102, 241, 0.15);
+  }
+
+  .android-bezel {
+    border: 12px solid #1e293b;
+    border-radius: 40px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(99, 102, 241, 0.1);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .status-glow {
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+  }
+
+  .indigo-glow {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Segmented Control (iOS style) */
+  .segmented-control {
+    background: rgba(30, 41, 59, 0.6);
+    backdrop-filter: blur(8px);
+    border-radius: 9999px;
+    padding: 4px;
+    display: inline-flex;
+    position: relative;
+    border: 1px solid rgba(148, 163, 184, 0.1);
+  }
+
+  .segmented-control-btn {
+    flex: 1;
+    text-align: center;
+    border-radius: 9999px;
+    padding: 6px 16px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #94a3b8;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    z-index: 10;
+  }
+
+  .segmented-control-btn.active {
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  }
+
+  .segmented-indicator {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+    box-shadow: 0 2px 8px rgba(79, 70, 229, 0.4);
+    z-index: 1;
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Modern Selectbox */
+  .modern-select {
+    appearance: none;
+    background-color: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    border-radius: 12px;
+    color: #f8fafc;
+    padding: 8px 32px 8px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+    transition: all 0.2s ease;
+  }
+  
+  .modern-select:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  }
+
+  .modern-select option {
+    background-color: #0f172a;
+    color: #f8fafc;
+  }
+
+  /* Hero Balance Typography */
+  .hero-balance {
+    font-size: 2.5rem;
+    font-weight: 900;
+    letter-spacing: -0.05em;
+    background: linear-gradient(180deg, #ffffff 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0px 4px 8px rgba(0,0,0,0.5));
+  }
+}
+
+body {
+  background-color: #020617;
+  color: #f8fafc;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* High-Contrast Pro Theme Mode Overrides */
+html.theme-high-contrast body {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+html.theme-high-contrast .glass-card {
+  background: #090d16;
+  border: 1.5px solid #334155;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
+}
+
+html.theme-high-contrast .glass-card-hover:hover {
+  background: #0e1626;
+  border-color: #6366f1;
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+}
+
+html.theme-high-contrast .bg-slate-950,
+html.theme-high-contrast .bg-slate-950\/80,
+html.theme-high-contrast .bg-slate-950\/90,
+html.theme-high-contrast .bg-slate-950\/50 {
+  background-color: #030712 !important;
+}
+
+html.theme-high-contrast .bg-slate-900,
+html.theme-high-contrast .bg-slate-900\/80,
+html.theme-high-contrast .bg-slate-900\/90 {
+  background-color: #0a0f1d !important;
+}
+
+html.theme-high-contrast .border-slate-800,
+html.theme-high-contrast .border-slate-800\/80,
+html.theme-high-contrast .border-slate-800\/60 {
+  border-color: #334155 !important;
+}
+
+html.theme-high-contrast .text-slate-400 {
+  color: #cbd5e1 !important;
+}
+
+html.theme-high-contrast .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.theme-high-contrast .android-bezel {
+  border-color: #334155 !important;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.9), 0 0 35px rgba(99, 102, 241, 0.3) !important;
+}
+
+/* Neon Synthwave Theme Mode Overrides */
+html.theme-neon-synthwave body {
+  background-color: #1a0b2e;
+  color: #fce7f3;
+}
+html.theme-neon-synthwave .glass-card {
+  background: rgba(45, 14, 64, 0.6);
+  border: 1px solid rgba(236, 72, 153, 0.4);
+  box-shadow: 0 4px 15px rgba(236, 72, 153, 0.15);
+}
+html.theme-neon-synthwave .glass-card-hover:hover {
+  background: rgba(74, 21, 102, 0.8);
+  border-color: #f472b6;
+  box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+}
+html.theme-neon-synthwave .bg-slate-950,
+html.theme-neon-synthwave .bg-slate-950\/80,
+html.theme-neon-synthwave .bg-slate-950\/90,
+html.theme-neon-synthwave .bg-slate-950\/50 {
+  background-color: #0d061c !important;
+}
+html.theme-neon-synthwave .bg-slate-900,
+html.theme-neon-synthwave .bg-slate-900\/80,
+html.theme-neon-synthwave .bg-slate-900\/90 {
+  background-color: #261042 !important;
+}
+html.theme-neon-synthwave .border-slate-800,
+html.theme-neon-synthwave .border-slate-800\/80,
+html.theme-neon-synthwave .border-slate-800\/60 {
+  border-color: rgba(168, 85, 247, 0.4) !important;
+}
+html.theme-neon-synthwave .text-slate-400 {
+  color: #fbcfe8 !important;
+}
+html.theme-neon-synthwave .text-slate-500 {
+  color: #d8b4fe !important;
+}
+html.theme-neon-synthwave .android-bezel {
+  border-color: #4a1566 !important;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.9), 0 0 40px rgba(236, 72, 153, 0.3) !important;
+}
+html.theme-neon-synthwave .text-emerald-400,
+html.theme-neon-synthwave .text-green-400,
+html.theme-neon-synthwave .text-green-500 {
+  color: #2dd4bf !important; /* Cyan instead of green */
+}
+html.theme-neon-synthwave .bg-emerald-500\/10,
+html.theme-neon-synthwave .bg-green-500\/10,
+html.theme-neon-synthwave .bg-emerald-500\/20 {
+  background-color: rgba(45, 212, 191, 0.15) !important;
+}
+html.theme-neon-synthwave .border-emerald-500\/30,
+html.theme-neon-synthwave .border-green-500\/30 {
+  border-color: rgba(45, 212, 191, 0.4) !important;
+}
+
+/* Arctic Light Theme Mode Overrides */
+html.theme-arctic-light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+html.theme-arctic-light .glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+}
+html.theme-arctic-light .glass-card-hover:hover {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.08);
+}
+html.theme-arctic-light .bg-slate-950,
+html.theme-arctic-light .bg-slate-950\/80,
+html.theme-arctic-light .bg-slate-950\/90,
+html.theme-arctic-light .bg-slate-950\/50 {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+html.theme-arctic-light .bg-slate-900,
+html.theme-arctic-light .bg-slate-900\/80,
+html.theme-arctic-light .bg-slate-900\/90 {
+  background-color: #ffffff !important;
+}
+html.theme-arctic-light .border-slate-800,
+html.theme-arctic-light .border-slate-800\/80,
+html.theme-arctic-light .border-slate-800\/60,
+html.theme-arctic-light .border-slate-900 {
+  border-color: #e2e8f0 !important;
+}
+html.theme-arctic-light .text-slate-400 {
+  color: #64748b !important;
+}
+html.theme-arctic-light .text-slate-500 {
+  color: #475569 !important;
+}
+html.theme-arctic-light .text-slate-300 {
+  color: #334155 !important;
+}
+html.theme-arctic-light .text-white {
+  color: #0f172a !important;
+}
+html.theme-arctic-light .android-bezel {
+  border-color: #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Monochrome Terminal Theme Mode Overrides */
+html.theme-monochrome-terminal body {
+  background-color: #050505;
+  color: #22c55e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+html.theme-monochrome-terminal .glass-card {
+  background: #000000;
+  border: 1px solid #14532d;
+  box-shadow: none;
+  border-radius: 4px;
+}
+html.theme-monochrome-terminal .glass-card-hover:hover {
+  background: #051005;
+  border-color: #22c55e;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.2);
+}
+html.theme-monochrome-terminal .bg-slate-950,
+html.theme-monochrome-terminal .bg-slate-950\/80,
+html.theme-monochrome-terminal .bg-slate-950\/90,
+html.theme-monochrome-terminal .bg-slate-950\/50,
+html.theme-monochrome-terminal .bg-slate-900,
+html.theme-monochrome-terminal .bg-slate-900\/80,
+html.theme-monochrome-terminal .bg-slate-900\/90 {
+  background-color: #000000 !important;
+}
+html.theme-monochrome-terminal .border-slate-800,
+html.theme-monochrome-terminal .border-slate-800\/80,
+html.theme-monochrome-terminal .border-slate-800\/60 {
+  border-color: #14532d !important;
+}
+html.theme-monochrome-terminal .text-slate-400,
+html.theme-monochrome-terminal .text-slate-500,
+html.theme-monochrome-terminal .text-slate-300,
+html.theme-monochrome-terminal .text-white {
+  color: #4ade80 !important;
+}
+html.theme-monochrome-terminal .text-emerald-400,
+html.theme-monochrome-terminal .text-green-400,
+html.theme-monochrome-terminal .text-green-500,
+html.theme-monochrome-terminal .text-cyan-400,
+html.theme-monochrome-terminal .text-indigo-400,
+html.theme-monochrome-terminal .text-purple-400,
+html.theme-monochrome-terminal .text-amber-400,
+html.theme-monochrome-terminal .text-red-400 {
+  color: #22c55e !important;
+}
+html.theme-monochrome-terminal .bg-indigo-600,
+html.theme-monochrome-terminal .bg-indigo-500,
+html.theme-monochrome-terminal .bg-indigo-500\/20,
+html.theme-monochrome-terminal .bg-emerald-500\/10,
+html.theme-monochrome-terminal .bg-red-500\/10,
+html.theme-monochrome-terminal .bg-amber-500\/10 {
+  background-color: rgba(34, 197, 94, 0.1) !important;
+  color: #22c55e !important;
+  border: 1px solid #14532d !important;
+}
+html.theme-monochrome-terminal .android-bezel {
+  border-color: #0a2010 !important;
+  box-shadow: none !important;
+  border-radius: 10px;
+}
+html.theme-monochrome-terminal rounded-xl,
+html.theme-monochrome-terminal rounded-2xl,
+html.theme-monochrome-terminal rounded-lg,
+html.theme-monochrome-terminal rounded-full {
+  border-radius: 4px !important;
+}
