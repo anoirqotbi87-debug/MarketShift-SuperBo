@@ -11,7 +11,7 @@ class MT5Connector(IBrokerConnector):
         self.login = login
         self.password = password
         self.server = server
-        self.connected = false
+        self.connected = False
 
     def connect(self) -> bool:
         if not mt5.initialize():
