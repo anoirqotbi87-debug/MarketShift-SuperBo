@@ -2,6 +2,7 @@ import MetaTrader5 as mt5
 import logging
 from typing import Optional, List, Dict, Any
 import datetime
+import pandas as pd
 
 from core.interfaces import IBrokerConnector, AccountInfo, PositionInfo, OrderType
 
@@ -138,3 +139,22 @@ class MT5Connector(IBrokerConnector):
             return False
             
         return True
+
+    def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[pd.DataFrame]:
+        """Récupère l'historique OHLCV (Open, High, Low, Close, Volume) pour un symbole donné"""
+        if not self.connected: 
+            return None
+            
+        # timeframe MT5 (ex: mt5.TIMEFRAME_M15)
+        rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)
+        
+        if rates is None or len(rates) == 0:
+            logging.error(f"Impossible de récupérer l'historique pour {symbol}")
+            return None
+            
+        # Conversion en DataFrame Pandas
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        
+        return df
+
