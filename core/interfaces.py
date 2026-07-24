@@ -15,6 +15,10 @@ class Signal(BaseModel):
     source: str  # e.g., "EMA_Strategy", "ML_Filter"
     timestamp: datetime.datetime = datetime.datetime.now()
     metadata: Dict[str, Any] = {}
+    # ATR-based SL/TP (en pips, calculés par les stratégies)
+    sl_pips: Optional[float] = None
+    tp_pips: Optional[float] = None
+    atr: Optional[float] = None
 
 class AccountInfo(BaseModel):
     login: int

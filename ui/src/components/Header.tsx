@@ -2,8 +2,9 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 import React, { useState } from 'react';
 import { ViewMode, ThemeMode, MT5AccountState, RiskConfig } from '../types';
-import { LogOut, ShieldAlert, Cpu, FileText, Smartphone, RefreshCw, Zap, WifiOff, AlertTriangle, Play, Radio, Sun, Moon, Contrast, Fingerprint, ChevronDown, Settings2 } from 'lucide-react';
+import { LogOut, ShieldAlert, Cpu, FileText, Smartphone, RefreshCw, Zap, WifiOff, AlertTriangle, Play, Radio, Sun, Moon, Contrast, Fingerprint, ChevronDown, Settings2, Wifi, Radio as WsRadio } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
+import { WsStatus } from '../hooks/useMT5WebSocket';
 import { BiometricAuthModal } from './BiometricAuthModal';
 
 interface HeaderProps {
@@ -19,6 +20,8 @@ interface HeaderProps {
   onResetCircuitBreaker?: () => void;
   onForceReconnect?: () => void;
   onSimulateDisconnect?: () => void;
+  wsStatus?: WsStatus;
+  onWsReconnect?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,7 +36,9 @@ export const Header: React.FC<HeaderProps> = ({
   onTriggerCircuitBreaker,
   onResetCircuitBreaker,
   onForceReconnect,
-  onSimulateDisconnect
+  onSimulateDisconnect,
+  wsStatus,
+  onWsReconnect,
 }) => {
   const [isBioModalOpen, setIsBioModalOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -154,7 +159,32 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Status Controls */}
           <div className="flex items-center gap-2.5 w-full md:w-auto justify-end font-mono">
-            
+
+            {/* WebSocket Status Indicator */}
+            {wsStatus && (
+              <button
+                onClick={onWsReconnect}
+                title={`WebSocket: ${wsStatus}`}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[10px] font-bold transition-all ${
+                  wsStatus === 'connected'
+                    ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
+                    : wsStatus === 'connecting' || wsStatus === 'reconnecting'
+                    ? 'bg-amber-950/60 border-amber-800/60 text-amber-400 animate-pulse'
+                    : 'bg-red-950/60 border-red-800/60 text-red-400'
+                }`}
+              >
+                {wsStatus === 'connected' ? (
+                  <><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" /><span>WS</span></>
+                ) : wsStatus === 'reconnecting' ? (
+                  <><RefreshCw className="w-3 h-3 animate-spin" /><span>WS</span></>
+                ) : wsStatus === 'fallback_polling' ? (
+                  <><WifiOff className="w-3 h-3" /><span>POLL</span></>
+                ) : (
+                  <><AlertTriangle className="w-3 h-3" /><span>WS ERR</span></>
+                )}
+              </button>
+            )}
+
             {/* Connection Status Pill & Simulation Switch */}
             <button
               onClick={handleToggleConnectionState}

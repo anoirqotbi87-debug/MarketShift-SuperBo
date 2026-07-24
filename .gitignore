@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+
+# Variables d'environnement (NE JAMAIS COMMITER)
+.env
+.env.local
+.env.*.local
+
+# Modèles ML sauvegardés
+*.pkl
+*.joblib
+*.model
+
+# Logs
+*.log
+logs/
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

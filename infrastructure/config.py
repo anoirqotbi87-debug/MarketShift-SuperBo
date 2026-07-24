@@ -5,35 +5,48 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement
 load_dotenv()
 
+
 class Config:
-    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+    ENVIRONMENT  = os.getenv("ENVIRONMENT", "development")
     ACTIVE_BROKER = os.getenv("ACTIVE_BROKER", "xm").upper()
     SIMULATION_MODE = os.getenv("SIMULATION_MODE", "true").lower() == "true"
-    
-    # Risk settings
-    MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", 0.05))
-    MAX_RISK_PER_TRADE_PCT = float(os.getenv("MAX_RISK_PER_TRADE_PCT", 0.01))
-    EMERGENCY_CLOSE_ENABLED = os.getenv("EMERGENCY_CLOSE_ENABLED", "true").lower() == "true"
+
+    # ── Multi-Symbole ─────────────────────────────────────────────────────────
+    TRADING_SYMBOLS: list = [
+        s.strip() for s in
+        os.getenv("TRADING_SYMBOLS", "EURUSD,GBPUSD,USDJPY,XAUUSD").split(",")
+        if s.strip()
+    ]
+    MAX_POSITIONS: int = int(os.getenv("MAX_POSITIONS", 5))
+
+    # ── Risk settings ────────────────────────────────────────────────────────
+    MAX_DAILY_LOSS_PCT           = float(os.getenv("MAX_DAILY_LOSS_PCT", 0.05))
+    MAX_RISK_PER_TRADE_PCT       = float(os.getenv("MAX_RISK_PER_TRADE_PCT", 0.01))
+    EMERGENCY_CLOSE_ENABLED      = os.getenv("EMERGENCY_CLOSE_ENABLED", "true").lower() == "true"
     CIRCUIT_BREAKER_MAX_VIOLATIONS = int(os.getenv("CIRCUIT_BREAKER_MAX_VIOLATIONS", 5))
-    
-    # ML
-    ML_CONFIDENCE_THRESHOLD = float(os.getenv("ML_CONFIDENCE_THRESHOLD", 0.75))
+
+    # ── ATR SL/TP Multipliers ────────────────────────────────────────────────
+    ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))
+    ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.5))
+
+    # ── ML ────────────────────────────────────────────────────────────────────
+    ML_CONFIDENCE_THRESHOLD = float(os.getenv("ML_CONFIDENCE_THRESHOLD", 0.60))
 
     @classmethod
     def get_broker_credentials(cls):
-        """Récupère les identifiants du broker actif"""
+        """Récupère les identifiants du broker actif."""
         if cls.ACTIVE_BROKER == "XM":
-            login = os.getenv("XM_LOGIN", "")
+            login    = os.getenv("XM_LOGIN", "")
             password = os.getenv("XM_PASSWORD", "")
-            server = os.getenv("XM_SERVER", "XMGlobal-MT5Real")
+            server   = os.getenv("XM_SERVER", "XMGlobal-MT5Real")
         elif cls.ACTIVE_BROKER == "EXNESS":
-            login = os.getenv("EXNESS_LOGIN", "")
+            login    = os.getenv("EXNESS_LOGIN", "")
             password = os.getenv("EXNESS_PASSWORD", "")
-            server = os.getenv("EXNESS_SERVER", "")
+            server   = os.getenv("EXNESS_SERVER", "")
         else:
             logging.error(f"Broker inconnu: {cls.ACTIVE_BROKER}")
             return 0, "", ""
-            
+
         try:
             login_int = int(login) if login else 0
             return login_int, password, server
