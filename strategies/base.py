@@ -103,15 +103,18 @@ class StrategyBase(IStrategy):
 
     @staticmethod
     def get_pip_size(symbol: str) -> float:
-        """Retourne la taille d'un pip selon le symbole."""
-        symbol_upper = symbol.upper()
-        if 'JPY' in symbol_upper:
+        """Retourne la taille d'un pip selon le symbole.
+        Gère les suffixes broker XM (#) et noms alternatifs (GOLD# = Or).
+        """
+        # Normaliser : supprimer # et suffixes broker
+        s = symbol.upper().replace('#', '').replace('.', '')
+        if 'JPY' in s:
             return 0.01     # Paires JPY
-        elif 'XAU' in symbol_upper or 'GOLD' in symbol_upper:
-            return 0.1      # Or
-        elif 'XAG' in symbol_upper:
+        elif 'XAU' in s or s == 'GOLD':
+            return 0.1      # Or (XAUUSD ou GOLD#)
+        elif 'XAG' in s or s == 'SILVER':
             return 0.001    # Argent
-        elif 'BTC' in symbol_upper or 'ETH' in symbol_upper:
+        elif 'BTC' in s or 'ETH' in s:
             return 1.0      # Crypto
         else:
             return 0.0001   # Forex standard (EUR/USD, GBP/USD, etc.)

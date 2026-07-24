@@ -42,6 +42,11 @@ class Engine:
         self.prechecker    = OrderPreCheckerAgent()
         self.position_sizer = PositionSizer()
 
+        # Stocker les constantes MT5 à l'init pour éviter tout problème de scope
+        # mt5.TIMEFRAME_M1 = 1
+        self._tf_m1  = mt5.TIMEFRAME_M1
+        self._tf_m15 = mt5.TIMEFRAME_M15
+
         # Multi-symbole : chaque symbole a ses propres instances de stratégies
         self.symbols: list = Config.TRADING_SYMBOLS
         self._symbol_strategies: Dict[str, list] = {}
@@ -140,7 +145,8 @@ class Engine:
     def _process_symbol(self, symbol: str):
         """Traite un symbole : données → signal → ML → sizing → exécution."""
         # 1. Récupérer les données OHLCV M1 (200 bougies pour ML features)
-        df = self.connector.get_historical_data(symbol, mt5.TIMEFRAME_M1, 200)
+        # On utilise self._tf_m1 (stocké dans __init__) pour éviter tout problème de scope Python 3.14
+        df = self.connector.get_historical_data(symbol, self._tf_m1, 200)
         if df is None or df.empty:
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
@@ -248,10 +254,13 @@ class Engine:
 
     def _refresh_kelly_history(self):
         """Récupère l'historique réel MT5 pour alimenter le Kelly Criterion."""
+        # Utiliser mt5 module-level (déjà importé en haut du fichier)
+        # NE PAS faire 'import MetaTrader5 as mt5' ici — cela créerait une variable locale
+        # qui entrerait en conflit avec le mt5 module-level sous Python 3.14+
         try:
-            import datetime
-            from_date = datetime.datetime.now() - datetime.timedelta(days=60)
-            to_date   = datetime.datetime.now()
+            import datetime as _dt
+            from_date = _dt.datetime.now() - _dt.timedelta(days=60)
+            to_date   = _dt.datetime.now()
 
             deals = mt5.history_deals_get(from_date, to_date)
             if deals is None:
@@ -271,27 +280,40 @@ class Engine:
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:
-        """Retourne la valeur en $ d'un pip par lot standard selon le symbole."""
-        symbol_upper = symbol.upper()
-        if 'JPY' in symbol_upper:
-            return 9.30    # ~9.30$ par pip pour 1 lot USD/JPY
-        elif 'XAU' in symbol_upper or 'GOLD' in symbol_upper:
-            return 10.0    # Or : 1$ par pip × 0.1 pip_size = 10$ par lot
-        elif 'GBP' in symbol_upper:
-            return 10.0    # ~10$ par pip
+        """Retourne la valeur en $ d'un pip par lot standard selon le symbole.
+        Gère les suffixes XM (#) et noms alternatifs (GOLD# = XAU/USD).
+        """
+        s = symbol.upper().replace('#', '').replace('.', '')
+        if 'JPY' in s:
+            return 9.30
+        elif 'XAU' in s or s == 'GOLD':
+            return 10.0
+        elif 'XAG' in s or s == 'SILVER':
+            return 5.0
+        elif 'GBP' in s:
+            return 10.0
         else:
-            return 10.0    # Standard Forex: 10$ par pip pour 1 lot
+            return 10.0
 
     @staticmethod
     def _symbol_to_magic(symbol: str) -> int:
-        """Génère un magic number unique par symbole (pour identifier les ordres)."""
+        """Génère un magic number unique par symbole.
+        Gère les suffixes broker (EURUSD# → 11001, GOLD# → 11004).
+        """
+        # Normaliser : supprimer # et suffixes broker
+        base = symbol.upper().replace('#', '').replace('.', '').replace('_', '')
         magic_map = {
             'EURUSD': 11001,
             'GBPUSD': 11002,
             'USDJPY': 11003,
             'XAUUSD': 11004,
+            'GOLD':   11004,
             'USDCHF': 11005,
             'AUDUSD': 11006,
             'USDCAD': 11007,
+            'USDCNH': 11008,
+            'EURGBP': 11009,
+            'XAGUSD': 11010,
+            'SILVER': 11010,
         }
-        return magic_map.get(symbol.upper(), 10000 + abs(hash(symbol)) % 1000)
+        return magic_map.get(base, 10000 + abs(hash(base)) % 1000)
