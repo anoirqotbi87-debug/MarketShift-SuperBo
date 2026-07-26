@@ -660,3 +660,60 @@ def get_kelly_stats():
         "kellyFraction": round(sizer.compute_kelly_fraction(), 4),
         "kellyPct":      round(sizer.compute_kelly_fraction() * 100, 2),
     }
+
+@app.get("/kpi")
+def get_kpi_metrics():
+    """
+    Retourne les KPIs institutionnels calculés depuis la base de données.
+    Métriques: Expectancy, Profit Factor, Gross Profit, Gross Loss.
+    """
+    if not _engine or not _engine.db:
+        return {"error": "Base de données non connectée"}
+        
+    try:
+        from infrastructure.models import TradeRecord
+        from sqlalchemy import func
+        
+        db = _engine.db
+        
+        # Récupérer tous les trades
+        trades = db.query(TradeRecord).all()
+        if not trades:
+            return {
+                "expectancy": 0.0,
+                "profit_factor": 0.0,
+                "gross_profit": 0.0,
+                "gross_loss": 0.0,
+                "total_trades": 0
+            }
+            
+        winning_trades = [t.profit for t in trades if t.profit > 0]
+        losing_trades = [t.profit for t in trades if t.profit < 0]
+        
+        gross_profit = sum(winning_trades)
+        gross_loss = abs(sum(losing_trades))
+        
+        win_rate = len(winning_trades) / len(trades) if len(trades) > 0 else 0
+        loss_rate = len(losing_trades) / len(trades) if len(trades) > 0 else 0
+        
+        avg_win = gross_profit / len(winning_trades) if len(winning_trades) > 0 else 0
+        avg_loss = gross_loss / len(losing_trades) if len(losing_trades) > 0 else 0
+        
+        # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
+        expectancy = (win_rate * avg_win) - (loss_rate * avg_loss)
+        
+        # Profit Factor = Gross Profit / Gross Loss
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        if profit_factor == float('inf'):
+            profit_factor = 999.0
+            
+        return {
+            "expectancy": round(expectancy, 2),
+            "profit_factor": round(profit_factor, 2),
+            "gross_profit": round(gross_profit, 2),
+            "gross_loss": round(gross_loss, 2),
+            "total_trades": len(trades)
+        }
+    except Exception as e:
+        logging.error(f"[API] Erreur calcul KPIs : {e}")
+        return {"error": str(e)}

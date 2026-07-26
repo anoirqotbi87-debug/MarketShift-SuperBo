@@ -21,6 +21,7 @@ from application.position_sizer import PositionSizer
 from agents.kill_switch import KillSwitch
 from agents.circuit_breaker import CircuitBreaker
 from risk.pretrade_validator import PreTradeValidator
+from risk.dynamic_trailing_stop import DynamicTrailingStop
 from core.interfaces import IBrokerConnector, OrderType, Signal
 from infrastructure.config import Config
 
@@ -44,6 +45,7 @@ class Engine:
         self.circuit_breaker = CircuitBreaker(self.state_manager, self.kill_switch)
         self.db = db_session
         self.pretrade_validator = PreTradeValidator(db_session=self.db)
+        self.dynamic_ts = DynamicTrailingStop()
         self.position_sizer = PositionSizer(db_session=self.db)
 
         # Stocker les constantes MT5 à l'init pour éviter tout problème de scope
@@ -122,6 +124,9 @@ class Engine:
 
     async def _async_run_loop(self):
         """Boucle principale de trading multi-symbole en mode asynchrone (100% parallèle)."""
+        self.order_queue = asyncio.Queue()
+        worker_task = asyncio.create_task(self._order_routing_worker())
+        
         while self.running:
             if self.kill_switch.is_triggered:
                 await asyncio.sleep(1)
@@ -241,41 +246,18 @@ class Engine:
             f"ML Confidence={validated_signal.metadata.get('ml_confidence', 'N/A')}"
         )
 
-        # 8. Exécution de l'ordre (Offload au ThreadPool)
-        result = await asyncio.to_thread(
-            self.connector.execute_order,
-            symbol,
-            validated_signal.direction,
-            volume,
-            sl_price,
-            tp_price,
-            self._symbol_to_magic(symbol)
-        )
-
-        if result:
-            logging.info(
-                f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
-                f"Prix: {result['price']} | Volume: {result['volume']}"
-            )
-            
-            # Trace d'Audit MiFID II
-            try:
-                from utils.audit_trail import AuditTrail
-                if not hasattr(self, 'audit_trail'):
-                    self.audit_trail = AuditTrail()
-                
-                self.audit_trail.log_order({
-                    'ticket': result['ticket'],
-                    'symbol': symbol,
-                    'direction': validated_signal.direction.name,
-                    'volume': result['volume'],
-                    'price': result['price'],
-                    'sl': sl_price,
-                    'tp': tp_price,
-                    'ml_confidence': validated_signal.metadata.get('ml_confidence', 0.0)
-                })
-            except Exception as e:
-                logging.error(f"[Engine] Erreur AuditTrail : {e}")
+        # 8. Exécution de l'ordre (Offload asynchrone Hummingbot-style)
+        payload = {
+            'symbol': symbol,
+            'direction': validated_signal.direction,
+            'volume': volume,
+            'sl_price': sl_price,
+            'tp_price': tp_price,
+            'magic': self._symbol_to_magic(symbol),
+            'metadata': validated_signal.metadata
+        }
+        await self.order_queue.put(payload)
+        logging.info(f"[Engine] ⚡ Ordre {validated_signal.direction.name} {volume} sur {symbol} mis en queue de routage asynchrone.")
 
     def _compute_sl_tp_prices(
         self, symbol: str, direction: OrderType,
@@ -363,24 +345,21 @@ class Engine:
 
         for p in self.state_manager.positions:
             pip_size = StrategyBase.get_pip_size(p.symbol)
-            # Distance de trailing (base 20 pips * multiplicateur)
-            trail_distance = 20.0 * pip_size * multiplier
+            # Distance de base (proxy pour ATR = 20 pips)
+            atr_value = 20.0 * pip_size * multiplier
 
-            if p.type == OrderType.BUY:
-                new_sl = p.current_price - trail_distance
-                # Si le trade est profitable de + de trail_distance et que le nouveau SL est meilleur
-                if (p.current_price - p.open_price) > trail_distance and new_sl > p.sl:
-                    logging.info(f"[Engine] 🛡️ Trailing Stop (BUY) ajusté pour {p.symbol} (Ticket {p.ticket}): {p.sl:.5f} -> {new_sl:.5f}")
-                    self.connector.modify_position(p.ticket, p.symbol, new_sl)
-                    p.sl = new_sl # Maj de l'état local
+            new_sl = self.dynamic_ts.calculate_new_stop(
+                current_price=p.current_price,
+                open_price=p.open_price,
+                current_stop=p.sl,
+                direction=p.type.name,
+                atr_value=atr_value
+            )
 
-            elif p.type == OrderType.SELL:
-                new_sl = p.current_price + trail_distance
-                # Si le trade est profitable de + de trail_distance et que le nouveau SL est meilleur (plus bas)
-                if (p.open_price - p.current_price) > trail_distance and (new_sl < p.sl or p.sl == 0.0):
-                    logging.info(f"[Engine] 🛡️ Trailing Stop (SELL) ajusté pour {p.symbol} (Ticket {p.ticket}): {p.sl:.5f} -> {new_sl:.5f}")
-                    self.connector.modify_position(p.ticket, p.symbol, new_sl)
-                    p.sl = new_sl # Maj de l'état local
+            if new_sl:
+                logging.info(f"[Engine] 🛡️ Trailing Stop Elastique ({p.type.name}) ajusté pour {p.symbol} (Ticket {p.ticket}): {p.sl:.5f} -> {new_sl:.5f}")
+                self.connector.modify_position(p.ticket, p.symbol, new_sl)
+                p.sl = new_sl  # Maj de l'état local
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:
@@ -421,3 +400,57 @@ class Engine:
             'SILVER': 11010,
         }
         return magic_map.get(base, 10000 + abs(hash(base)) % 1000)
+
+    async def _order_routing_worker(self):
+        """
+        Worker asynchrone (Hummingbot-style).
+        Dépile les ordres de la file et les exécute sans bloquer la boucle principale.
+        """
+        logging.info("[Engine] ⚡ Order Routing Worker démarré.")
+        while self.running:
+            try:
+                # Attend un ordre de la queue
+                payload = await self.order_queue.get()
+                
+                # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent)
+                result = await asyncio.to_thread(
+                    self.connector.execute_order,
+                    payload['symbol'],
+                    payload['direction'],
+                    payload['volume'],
+                    payload['sl_price'],
+                    payload['tp_price'],
+                    payload['magic']
+                )
+
+                if result:
+                    logging.info(
+                        f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
+                        f"Prix: {result['price']} | Volume: {result['volume']}"
+                    )
+                    
+                    # Trace d'Audit MiFID II
+                    try:
+                        from utils.audit_trail import AuditTrail
+                        if not hasattr(self, 'audit_trail'):
+                            self.audit_trail = AuditTrail()
+                        
+                        self.audit_trail.log_order({
+                            'ticket': result['ticket'],
+                            'symbol': payload['symbol'],
+                            'direction': payload['direction'].name,
+                            'volume': result['volume'],
+                            'price': result['price'],
+                            'sl': payload['sl_price'],
+                            'tp': payload['tp_price'],
+                            'ml_confidence': payload['metadata'].get('ml_confidence', 0.0)
+                        })
+                    except Exception as e:
+                        logging.error(f"[Engine] Erreur AuditTrail : {e}")
+                        
+                self.order_queue.task_done()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logging.error(f"[Engine] Erreur Order Routing Worker: {e}")

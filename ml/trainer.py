@@ -197,23 +197,26 @@ class MLTrainer:
             X = processed[self.FEATURE_COLUMNS].values
             y = processed['label'].values
 
+            from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
+            
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, shuffle=False  # pas de shuffle pour données temporelles
+                X, y, test_size=0.2, shuffle=False  # Walk-Forward: Train on past, Test on future
             )
 
             scaler = StandardScaler()
             X_train_s = scaler.fit_transform(X_train)
             X_test_s  = scaler.transform(X_test)
 
-            # 1. Grid Search XGBoost
-            logging.info("[MLTrainer] Lancement du Grid Search XGBoost...")
+            # 1. Grid Search XGBoost (Walk-Forward Optimization Anti-Overfitting)
+            logging.info("[MLTrainer] Lancement du Grid Search XGBoost avec TimeSeriesSplit (WFO)...")
             param_grid = {
                 'n_estimators': [100, 200],
                 'max_depth': [3, 5],
                 'learning_rate': [0.05, 0.1]
             }
+            tscv = TimeSeriesSplit(n_splits=3) # Empêche le look-ahead bias dans la validation croisée
             xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
-            grid_search = GridSearchCV(estimator=xgb, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+            grid_search = GridSearchCV(estimator=xgb, param_grid=param_grid, cv=tscv, scoring='accuracy', n_jobs=-1)
             grid_search.fit(X_train_s, y_train)
             
             best_xgb = grid_search.best_estimator_
