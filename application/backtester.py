@@ -135,10 +135,17 @@ class Backtester:
                         account = AccountInfo(login=1, balance=self.balance, equity=self.balance, free_margin=self.balance, margin_level=100.0, currency="USD", server="Test")
                         volume = self.sizer.compute_volume(filtered_signal, account, pip_value=self.pip_value, sl_pips=filtered_signal.sl_pips)
                         
-                        # Exécution de l'ordre (au prix de clôture de la bougie actuelle)
-                        open_price = current_bar['close']
-                        sl_price = open_price - (filtered_signal.sl_pips / 10000) if signal.direction == OrderType.BUY else open_price + (filtered_signal.sl_pips / 10000)
-                        tp_price = open_price + (filtered_signal.tp_pips / 10000) if signal.direction == OrderType.BUY else open_price - (filtered_signal.tp_pips / 10000)
+                        # Exécution de l'ordre (au prix d'ouverture de la bougie SUIVANTE pour éviter le biais forward-looking)
+                        if i + 1 < len(test_df):
+                            next_bar = test_df.iloc[i + 1]
+                            open_price = next_bar['open']
+                            
+                            # Slippage basique (ex: 1 pip)
+                            slippage = 0.0001 if signal.direction == OrderType.BUY else -0.0001
+                            open_price += slippage
+                            
+                            sl_price = open_price - (filtered_signal.sl_pips / 10000) if signal.direction == OrderType.BUY else open_price + (filtered_signal.sl_pips / 10000)
+                            tp_price = open_price + (filtered_signal.tp_pips / 10000) if signal.direction == OrderType.BUY else open_price - (filtered_signal.tp_pips / 10000)
                         
                         new_order = BacktestOrder(
                             ticket=order_counter,
