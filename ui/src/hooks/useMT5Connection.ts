@@ -35,7 +35,7 @@ export function useMT5Connection(
     remainingMs: baseDelayMs,
     progressPct: 0,
     nextAttemptInSec: baseDelayMs / 1000,
-    lastDisconnectReason: 'Pertes de paquets TCP ZeroMQ Socket'
+    lastDisconnectReason: 'En attente du Bridge Python / MT5 hors ligne'
   });
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
