@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, Dispatch, SetStateAction } from 'react';
 import { MT5AccountState, ReconnectionState, MLModelStats, ActivePosition, ClosedTrade, LogEntry } from '../types';
+import { toast } from 'sonner';
 import { useMT5WebSocket, WsSnapshot } from './useMT5WebSocket';
 
 interface UseMT5ConnectionOptions {
@@ -510,9 +511,13 @@ export function useMT5Connection(
       
       const data = await res.json();
       if (onLogAdd) onLogAdd(`Trade exécuté : ${direction} ${data.volume} lots sur ${symbol} (Ticket: ${data.ticket})`, 'SUCCESS');
+      toast.success(`Trade ${direction} exécuté sur ${symbol}`, {
+        description: `${data.volume} lots - Ticket #${data.ticket}`
+      });
       return data;
     } catch (e: any) {
       if (onLogAdd) onLogAdd(`Erreur exécution trade : ${e.message}`, 'ERROR');
+      toast.error(`Échec du trade sur ${symbol}`, { description: e.message });
       throw e;
     }
   };
@@ -538,9 +543,13 @@ export function useMT5Connection(
       }
       
       if (onLogAdd) onLogAdd(`Position #${ticket} clôturée avec succès.`, 'SUCCESS');
+      toast.success(`Position #${ticket} clôturée`, {
+        description: 'La position a été fermée avec succès sur MT5.'
+      });
       return await res.json();
     } catch (e: any) {
       if (onLogAdd) onLogAdd(`Erreur clôture position : ${e.message}`, 'ERROR');
+      toast.error(`Échec de la clôture de la position #${ticket}`, { description: e.message });
       throw e;
     }
   };
