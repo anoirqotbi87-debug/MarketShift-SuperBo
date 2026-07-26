@@ -6,7 +6,8 @@ export type ActiveTabSimulator =
   | 'ml_engine' 
   | 'mt5_bridge' 
   | 'risk_security' 
-  | 'backtester' 
+  | 'backtester'
+  | 'optimizer' 
   | 'terminal_logs' 
   | 'ai_assistant';
 

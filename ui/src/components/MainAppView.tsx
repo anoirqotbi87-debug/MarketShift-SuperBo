@@ -7,6 +7,7 @@ import { MLEngineTab } from './tabs/MLEngineTab';
 import { MT5BridgeTab } from './tabs/MT5BridgeTab';
 import { RiskTab } from './tabs/RiskTab';
 import { BacktesterTab } from './tabs/BacktesterTab';
+import { OptimizerTab } from './tabs/OptimizerTab';
 import { LogsTab } from './tabs/LogsTab';
 import { AIAssistantTab } from './tabs/AIAssistantTab';
 import { ExportModal } from './ExportModal';
@@ -168,6 +169,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
     { id: 'dashboard', label: 'Accueil', icon: Home },
     { id: 'ml_engine', label: 'IA Signals', icon: Activity },
     { id: 'risk_security', label: 'Risque', icon: Shield },
+    { id: 'optimizer', label: 'Optimizer', icon: Sparkles },
     { id: 'terminal_logs', label: 'Logs & Term', icon: Terminal },
     { id: 'mt5_bridge', label: 'Réglages', icon: Settings },
   ];
@@ -321,6 +323,10 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
 
             {activeTab === 'backtester' && (
               <BacktesterTab />
+            )}
+
+            {activeTab === 'optimizer' && (
+              <OptimizerTab />
             )}
 
             {activeTab === 'terminal_logs' && (
