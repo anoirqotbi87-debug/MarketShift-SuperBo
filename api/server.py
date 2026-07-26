@@ -751,10 +751,239 @@ async def run_historical_backtest(
         
         logging.info(f"[API] Lancement Backtest pour {symbol} sur {len(df)} bougies uploadées.")
         tester = Backtester(initial_balance=initial_capital)
+            }
+
+    # 3. Fallback sur l'Aggregator technique
+    aggregator = _engine._symbol_aggregators.get(symbol, _engine.aggregator)
+    if aggregator:
+        sig = aggregator.aggregate(symbol)
+        if sig:
+            return {
+                "signal":     sig.direction.name,
+                "confidence": sig.confidence,
+                "reason":     sig.source,
+                "mlTrained":  _engine.ml_trainer.is_trained,
+            }
+
+    return {"signal": "WAIT", "confidence": 0, "reason": "No consensus", "mlTrained": _engine.ml_trainer.is_trained}
+
+
+class SettingsPayload(BaseModel):
+    sl_multiplier: Optional[float] = None
+    tp_multiplier: Optional[float] = None
+    risk_percent: Optional[float] = None
+    trailing_stop_active: Optional[bool] = None
+    trailing_stop_multiplier: Optional[float] = None
+    ml_confidence_threshold: Optional[float] = None
+
+
+@app.post("/settings")
+def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_key)):
+    """Met à jour les paramètres runtime depuis l'UI."""
+    global _runtime_settings
+
+    if payload.sl_multiplier is not None:
+        _runtime_settings.sl_multiplier = payload.sl_multiplier
+        # Propager à l'engine si disponible
+        if _engine:
+            for strategies in _engine._symbol_strategies.values():
+                for s in strategies:
+                    s.sl_multiplier = payload.sl_multiplier
+
+    if payload.tp_multiplier is not None:
+        _runtime_settings.tp_multiplier = payload.tp_multiplier
+        if _engine:
+            for strategies in _engine._symbol_strategies.values():
+                for s in strategies:
+                    s.tp_multiplier = payload.tp_multiplier
+
+    if payload.risk_percent is not None:
+        _runtime_settings.risk_percent = payload.risk_percent
+
+    if payload.trailing_stop_active is not None:
+        _runtime_settings.trailing_stop_active = payload.trailing_stop_active
+
+    if payload.trailing_stop_multiplier is not None:
+        _runtime_settings.trailing_stop_multiplier = payload.trailing_stop_multiplier
+
+    if payload.ml_confidence_threshold is not None:
+        _runtime_settings.ml_confidence_threshold = payload.ml_confidence_threshold
+        if _engine:
+            _engine.ml_predictor.set_confidence_threshold(payload.ml_confidence_threshold)
+
+    logging.info(
+        f"[API] Settings mis à jour: SL×{_runtime_settings.sl_multiplier} | "
+        f"TP×{_runtime_settings.tp_multiplier} | "
+        f"Risk={_runtime_settings.risk_percent:.1%} | "
+        f"ML Threshold={_runtime_settings.ml_confidence_threshold:.0%}"
+    )
+
+    return {
+        "status":                  "updated",
+        "sl_multiplier":           _runtime_settings.sl_multiplier,
+        "tp_multiplier":           _runtime_settings.tp_multiplier,
+        "risk_percent":            _runtime_settings.risk_percent,
+        "trailing_stop_active":    _runtime_settings.trailing_stop_active,
+        "trailing_stop_multiplier": _runtime_settings.trailing_stop_multiplier,
+        "ml_confidence_threshold": _runtime_settings.ml_confidence_threshold,
+    }
+
+
+@app.get("/settings")
+def get_settings():
+    """Retourne les paramètres runtime actuels."""
+    return {
+        "sl_multiplier":           _runtime_settings.sl_multiplier,
+        "tp_multiplier":           _runtime_settings.tp_multiplier,
+        "risk_percent":            _runtime_settings.risk_percent,
+        "trailing_stop_active":    _runtime_settings.trailing_stop_active,
+        "trailing_stop_multiplier": _runtime_settings.trailing_stop_multiplier,
+        "ml_confidence_threshold": _runtime_settings.ml_confidence_threshold,
+    }
+
+
+@app.get("/kelly")
+def get_kelly_stats():
+    """Retourne les statistiques Kelly du PositionSizer."""
+    if not _engine:
+        return {}
+    sizer = _engine.position_sizer
+    return {
+        "winRate":    round(sizer.win_rate, 3),
+        "rrRatio":    round(sizer.rr_ratio, 2),
+        "tradeCount": sizer.trade_count,
+        "kellyFraction": round(sizer.compute_kelly_fraction(), 4),
+        "kellyPct":      round(sizer.compute_kelly_fraction() * 100, 2),
+    }
+
+@app.get("/kpi")
+def get_kpi_metrics():
+    """
+    Retourne les KPIs institutionnels calculés depuis la base de données.
+    Métriques: Expectancy, Profit Factor, Gross Profit, Gross Loss.
+    """
+    if not _engine or not _engine.db:
+        return {"error": "Base de données non connectée"}
+        
+    try:
+        from infrastructure.models import TradeRecord
+        from sqlalchemy import func
+        
+        db = _engine.db
+        
+        # Récupérer tous les trades
+        trades = db.query(TradeRecord).all()
+        if not trades:
+            return {
+                "expectancy": 0.0,
+                "profit_factor": 0.0,
+                "gross_profit": 0.0,
+                "gross_loss": 0.0,
+                "total_trades": 0
+            }
+            
+        winning_trades = [t.profit for t in trades if t.profit > 0]
+        losing_trades = [t.profit for t in trades if t.profit < 0]
+        
+        gross_profit = sum(winning_trades)
+        gross_loss = abs(sum(losing_trades))
+        
+        win_rate = len(winning_trades) / len(trades) if len(trades) > 0 else 0
+        loss_rate = len(losing_trades) / len(trades) if len(trades) > 0 else 0
+        
+        avg_win = gross_profit / len(winning_trades) if len(winning_trades) > 0 else 0
+        avg_loss = gross_loss / len(losing_trades) if len(losing_trades) > 0 else 0
+        
+        # Expectancy = (WinRate * AvgWin) - (LossRate * AvgLoss)
+        expectancy = (win_rate * avg_win) - (loss_rate * avg_loss)
+        
+        # Profit Factor = Gross Profit / Gross Loss
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        if profit_factor == float('inf'):
+            profit_factor = 999.0
+            
+        return {
+            "expectancy": round(expectancy, 2),
+            "profit_factor": round(profit_factor, 2),
+            "gross_profit": round(gross_profit, 2),
+            "gross_loss": round(gross_loss, 2),
+            "total_trades": len(trades)
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+from fastapi import File, UploadFile, Form
+import pandas as pd
+import io
+
+@app.post("/backtest")
+async def run_historical_backtest(
+    file: UploadFile = File(...),
+    symbol: str = Form("EURUSD"),
+    initial_capital: float = Form(10000.0)
+):
+    """
+    Exécute un backtest historique réel sur le CSV fourni par l'utilisateur.
+    """
+    try:
+        # Lire le contenu du fichier
+        content = await file.read()
+        
+        # Charger avec Pandas (en essayant de deviner le format)
+        try:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        except Exception:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+            
+        # Nettoyage des colonnes basique
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        if 'open' not in df.columns or 'close' not in df.columns:
+            return {"error": "Le CSV doit contenir au moins les colonnes 'open' et 'close'."}
+            
+        # Lancer le backtest
+        from application.backtester import Backtester
+        
+        logging.info(f"[API] Lancement Backtest pour {symbol} sur {len(df)} bougies uploadées.")
+        tester = Backtester(initial_balance=initial_capital)
         report = tester.run(df, symbol)
         
         return report
         
     except Exception as e:
         logging.error(f"[API] Erreur Backtest : {e}")
+        return {"error": str(e)}
+
+@app.post("/optimize")
+async def run_auto_optimizer(
+    file: UploadFile = File(...),
+    symbol: str = Form("EURUSD"),
+    initial_capital: float = Form(10000.0)
+):
+    """
+    Exécute le Grid Search Auto-Optimizer sur le CSV fourni par l'utilisateur.
+    """
+    try:
+        content = await file.read()
+        
+        try:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        except Exception:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+            
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        if 'open' not in df.columns or 'close' not in df.columns:
+            return {"error": "Le CSV doit contenir au moins les colonnes 'open' et 'close'."}
+            
+        from optimization.auto_optimizer import AutoOptimizer
+        
+        logging.info(f"[API] Lancement Optimisation pour {symbol} sur {len(df)} bougies.")
+        optimizer = AutoOptimizer(df=df, initial_balance=initial_capital)
+        report = optimizer.optimize(symbol)
+        
+        return report
+        
+    except Exception as e:
+        logging.error(f"[API] Erreur Optimisation : {e}")
         return {"error": str(e)}

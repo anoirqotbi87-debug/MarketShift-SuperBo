@@ -1,5 +1,10 @@
-import MetaTrader5 as mt5
 import logging
+
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
+    logging.warning("MetaTrader5 not available (likely Linux OS). MT5 Connector will be disabled.")
 from typing import Optional, List, Dict, Any
 import datetime
 import pandas as pd
@@ -14,6 +19,10 @@ class MT5Connector(IBrokerConnector):
         self.connected = False
 
     def connect(self) -> bool:
+        if mt5 is None:
+            logging.error("MT5 connector disabled (MetaTrader5 not available).")
+            return False
+            
         if not mt5.initialize():
             logging.error(f"Echec initialisation MT5, code: {mt5.last_error()}")
             return False
@@ -29,7 +38,8 @@ class MT5Connector(IBrokerConnector):
         return True
 
     def disconnect(self) -> None:
-        mt5.shutdown()
+        if mt5 is not None:
+            mt5.shutdown()
         self.connected = False
         logging.info("MT5 déconnecté.")
 
