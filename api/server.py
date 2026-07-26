@@ -751,22 +751,12 @@ async def run_historical_backtest(
         
         logging.info(f"[API] Lancement Backtest pour {symbol} sur {len(df)} bougies uploadées.")
         tester = Backtester(initial_balance=initial_capital)
-            }
-
-    # 3. Fallback sur l'Aggregator technique
-    aggregator = _engine._symbol_aggregators.get(symbol, _engine.aggregator)
-    if aggregator:
-        sig = aggregator.aggregate(symbol)
-        if sig:
-            return {
-                "signal":     sig.direction.name,
-                "confidence": sig.confidence,
-                "reason":     sig.source,
-                "mlTrained":  _engine.ml_trainer.is_trained,
-            }
-
-    return {"signal": "WAIT", "confidence": 0, "reason": "No consensus", "mlTrained": _engine.ml_trainer.is_trained}
-
+        report = tester.run(df)
+        return report
+        
+    except Exception as e:
+        logging.error(f"[API] Erreur Backtest : {e}")
+        return {"error": str(e)}
 
 class SettingsPayload(BaseModel):
     sl_multiplier: Optional[float] = None
