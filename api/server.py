@@ -958,25 +958,32 @@ async def run_historical_backtest(
 
 @app.post("/optimize")
 async def run_auto_optimizer(
-    file: UploadFile = File(...),
-    symbol: str = Form("EURUSD"),
+    file: Optional[UploadFile] = File(None),
+    symbol: str = Form("EURUSD#"),
     initial_capital: float = Form(10000.0)
 ):
     """
-    Exécute le Grid Search Auto-Optimizer sur le CSV fourni par l'utilisateur.
+    Exécute le Grid Search Auto-Optimizer.
+    Si un fichier CSV est fourni, il l'utilise. Sinon, il télécharge l'historique MT5.
     """
     try:
-        content = await file.read()
-        
-        try:
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
-        except Exception:
-            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
-            
-        df.columns = [c.strip().lower() for c in df.columns]
+        if file:
+            content = await file.read()
+            try:
+                df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+            except Exception:
+                df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+            df.columns = [c.strip().lower() for c in df.columns]
+        else:
+            if not _engine or not _engine.connector:
+                return {"error": "Moteur non initialisé et aucun fichier CSV fourni."}
+            # Fetch MT5 history (e.g. 1000 bars)
+            df = _engine.connector.get_historical_data(symbol, 1000)
+            if df is None or df.empty:
+                return {"error": f"Impossible de récupérer l'historique MT5 pour {symbol}."}
         
         if 'open' not in df.columns or 'close' not in df.columns:
-            return {"error": "Le CSV doit contenir au moins les colonnes 'open' et 'close'."}
+            return {"error": "Les données doivent contenir au moins les colonnes 'open' et 'close'."}
             
         from optimization.auto_optimizer import AutoOptimizer
         
