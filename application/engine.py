@@ -218,7 +218,12 @@ class Engine:
             # sym_info.spread est en points, on le convertit en pips
             current_spread_pips = sym_info.spread * (sym_info.point / pip_size)
 
-        if not self.pretrade_validator.validate_signal(validated_signal, self.state_manager.account, current_spread_pips):
+        # Offload SQLAlchemy queries to a background thread to prevent blocking the async loop
+        is_valid = await asyncio.to_thread(
+            self.pretrade_validator.validate_signal,
+            validated_signal, self.state_manager.account, current_spread_pips
+        )
+        if not is_valid:
             # Le Validator gère lui-même ses propres logs d'erreurs détaillés
             return
 

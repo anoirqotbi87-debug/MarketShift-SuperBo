@@ -61,6 +61,18 @@ class SMCStrategy(StrategyBase):
             
             bullish_mss = current_close > swing_high
             bearish_mss = current_close < swing_low
+            
+            # --- 3. Filtre de Tendance Macro (HTF Proxy via EMA 200) ---
+            # On vérifie la tendance globale sur les 200 bougies M1
+            macro_trend_bullish = True
+            macro_trend_bearish = True
+            if len(self._df) >= 200:
+                ema_200 = self._df['close'].ewm(span=200, adjust=False).mean().iloc[-1]
+                macro_trend_bullish = current_close > ema_200
+                macro_trend_bearish = current_close < ema_200
+                
+            bullish_mss = bullish_mss and macro_trend_bullish
+            bearish_mss = bearish_mss and macro_trend_bearish
 
             pip_size = self.get_pip_size(symbol)
             sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
