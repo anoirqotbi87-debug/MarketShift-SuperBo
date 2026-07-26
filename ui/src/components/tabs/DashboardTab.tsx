@@ -18,6 +18,8 @@ import { PriceAlertsConfig } from '../PriceAlertsConfig';
 import { EconomicCalendar } from '../EconomicCalendar';
 import { LiveMLLatencyChart } from '../LiveMLLatencyChart';
 import { InfrastructureMonitor } from '../InfrastructureMonitor';
+import { KellyPositionSizer } from '../KellyPositionSizer';
+import { MultiSymbolPanel } from '../MultiSymbolPanel';
 import { TradeTagManager, TradeTagPill } from '../TradeTagManager';
 import { 
   TrendingUp, TrendingDown, DollarSign, Activity, AlertTriangle, ShieldCheck, XCircle, ArrowUpRight, ArrowDownRight, Download, History, FileSpreadsheet, Filter, Tag, QrCode, Wallet, Search, Calendar, CalendarDays, X, RotateCcw, Fingerprint, BarChart2, Brain, Newspaper, PieChart, Server, Globe, Briefcase 
@@ -184,9 +186,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         const q = searchQuery.trim().toLowerCase();
         const ticketMatch = String(trade.ticket).toLowerCase().includes(q);
         const symbolMatch = String(trade.symbol).toLowerCase().includes(q);
-        const reasonMatch = trade.signalReason.toLowerCase().includes(q);
-        const closeReasonMatch = trade.closeReason.toLowerCase().includes(q);
-        const tagMatch = trade.tags?.some(t => t.toLowerCase().includes(q));
+        const reasonMatch = (trade.signalReason || '').toLowerCase().includes(q);
+        const closeReasonMatch = (trade.closeReason || '').toLowerCase().includes(q);
+        const tagMatch = trade.tags?.some(t => (t || '').toLowerCase().includes(q));
 
         if (!ticketMatch && !symbolMatch && !reasonMatch && !closeReasonMatch && !tagMatch) {
           return false;
@@ -374,6 +376,21 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           >
             {/* Market Overview Top 5 Watched Symbols Sparklines */}
             <MarketOverviewSparklines />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Multi-Symbole & Gestion du Risque (Kelly)"
+            icon={<Globe className="w-4 h-4" />}
+            defaultExpanded={true}
+          >
+            <div className="space-y-4">
+              <MultiSymbolPanel positions={positions} isConnected={accountState.isConnected} localBridgeIp={`http://${window.location.hostname}:8000`} />
+              <KellyPositionSizer 
+                isConnected={accountState.isConnected} 
+                localBridgeIp={`http://${window.location.hostname}:8000`} 
+                maxRiskPct={riskConfig.maxRiskPerTradePct}
+              />
+            </div>
           </CollapsibleSection>
 
           <CollapsibleSection 

@@ -18,10 +18,12 @@ import time
 from collections import deque
 from typing import List, Optional, Any, Dict
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
+from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from infrastructure.config import Config
 from application.engine import Engine
 from core.interfaces import OrderType
 
@@ -35,10 +37,13 @@ class MemoryLogHandler(logging.Handler):
     def __init__(self, maxlen: int = 200):
         super().__init__()
         self._logs: deque = deque(maxlen=maxlen)
+        self._counter = 0
 
     def emit(self, record: logging.LogRecord):
         try:
+            self._counter += 1
             self._logs.appendleft({
+                "id": self._counter,
                 "timestamp": datetime.datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
                 "level":     record.levelname,
                 "module":    record.name.split(".")[-1].upper() if "." in record.name else record.name.upper(),
@@ -195,13 +200,14 @@ def _build_ws_snapshot() -> dict:
                 "ticket":       p.ticket,
                 "symbol":       p.symbol,
                 "type":         p.type.name,
-                "volume":       p.volume,
+                "lots":         p.volume,
                 "openPrice":    p.open_price,
                 "currentPrice": p.current_price,
-                "profit":       p.profit,
-                "sl":           p.sl,
-                "tp":           p.tp,
-                "magic":        p.magic,
+                "pnl":          p.profit,
+                "pnlPct":       0,
+                "stopLoss":     p.sl,
+                "takeProfit":   p.tp,
+                "magicNumber":  p.magic,
             }
             for p in _engine.state_manager.positions
         ]
@@ -234,6 +240,17 @@ def _build_ws_snapshot() -> dict:
             "tradeCount": _engine.position_sizer.trade_count,
         }
 
+    # ML Stats
+    ml_data = {}
+    if _engine:
+        ml_data = {
+            "trained": _engine.ml_trainer.is_trained,
+            "accuracy": round(_engine.ml_trainer.accuracy, 3),
+            "sampleCount": _engine.ml_trainer.sample_count,
+            "lastTrained": _engine.ml_trainer.last_trained,
+            "featureImportances": _engine.ml_trainer.get_feature_importances()
+        }
+
     return {
         "type":       "snapshot",
         "timestamp":  datetime.datetime.now().isoformat(),
@@ -241,6 +258,7 @@ def _build_ws_snapshot() -> dict:
         "positions":  positions_data,
         "signals":    signals_data,
         "kelly":      kelly_data,
+        "ml":         ml_data,
         "logs":       _memory_handler.get_logs()[:20],  # 20 derniers logs seulement
         "killSwitch": _engine.kill_switch.is_triggered if _engine else False,
         "isPaused":   _engine.state_manager.is_paused if _engine else False,
@@ -252,6 +270,20 @@ async def startup_event():
     """Lance le broadcaster WebSocket au démarrage."""
     asyncio.create_task(_broadcast_loop())
     logging.info("[API] Broadcaster WebSocket démarré.")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# API Security (Auth)
+# ─────────────────────────────────────────────────────────────────────────────
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+async def verify_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header == Config.API_SECRET_KEY:
+        return api_key_header
+    raise HTTPException(
+        status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -276,7 +308,7 @@ class ControlCommand(BaseModel):
 
 
 @app.post("/control")
-def control_bot(cmd: ControlCommand):
+def control_bot(cmd: ControlCommand, api_key: str = Depends(verify_api_key)):
     if not _engine:
         return {"error": "Engine offline"}
 
@@ -302,6 +334,25 @@ def get_account_information():
         raise HTTPException(status_code=503, detail="Account info not available")
 
     acc = _engine.state_manager.account
+    
+    unrealized = 0.0
+    realized_daily = 0.0
+    daily_pct = 0.0
+    
+    try:
+        import MetaTrader5 as mt5
+        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        deals = mt5.history_deals_get(today_start, datetime.datetime.now())
+        if deals:
+            realized_daily = sum(d.profit for d in deals if d.type <= 1)
+        unrealized = sum(p.profit for p in _engine.state_manager.positions)
+        
+        start_balance = acc.balance - realized_daily
+        if start_balance > 0:
+            daily_pct = ((realized_daily + unrealized) / start_balance) * 100
+    except Exception as e:
+        logging.error(f"[API] Erreur calcul PnL: {e}")
+
     return {
         "login":       acc.login,
         "balance":     acc.balance,
@@ -311,6 +362,9 @@ def get_account_information():
         "currency":    acc.currency,
         "server":      acc.server,
         "broker":      "XM" if "XM" in acc.server else "EXNESS",
+        "unrealizedPnL": unrealized,
+        "dailyPnL": realized_daily + unrealized,
+        "dailyPnLPct": daily_pct,
     }
 
 
@@ -323,13 +377,14 @@ def get_positions():
             "ticket":       p.ticket,
             "symbol":       p.symbol,
             "type":         p.type.name,
-            "volume":       p.volume,
+            "lots":         p.volume,
             "openPrice":    p.open_price,
             "currentPrice": p.current_price,
-            "profit":       p.profit,
-            "sl":           p.sl,
-            "tp":           p.tp,
-            "magic":        p.magic,
+            "pnl":          p.profit,
+            "pnlPct":       0,
+            "stopLoss":     p.sl,
+            "takeProfit":   p.tp,
+            "magicNumber":  p.magic,
         }
         for p in _engine.state_manager.positions
     ]
@@ -341,7 +396,7 @@ def get_history():
     try:
         import MetaTrader5 as mt5
         from_date = datetime.datetime.now() - datetime.timedelta(days=30)
-        to_date   = datetime.datetime.now()
+        to_date   = datetime.datetime.now() + datetime.timedelta(days=1)
 
         deals = mt5.history_deals_get(from_date, to_date)
         if deals is None:
@@ -349,7 +404,8 @@ def get_history():
 
         result = []
         for d in deals:
-            if d.profit != 0:  # Ignorer les deals sans P&L (ouvertures)
+            # DEAL_ENTRY_OUT = 1. We only want deals that closed a position.
+            if getattr(d, 'entry', 0) == 1 and d.type <= 1:
                 result.append({
                     "ticket":     d.ticket,
                     "symbol":     d.symbol,
@@ -447,7 +503,7 @@ class TradeRequest(BaseModel):
 
 
 @app.post("/trade")
-def execute_trade(req: TradeRequest):
+def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
     if not _engine:
         raise HTTPException(status_code=503, detail="Engine offline")
 
@@ -468,7 +524,7 @@ class CloseRequest(BaseModel):
 
 
 @app.post("/close")
-def close_trade(req: CloseRequest):
+def close_trade(req: CloseRequest, api_key: str = Depends(verify_api_key)):
     if not _engine:
         raise HTTPException(status_code=503, detail="Engine offline")
     success = _engine.connector.close_position(req.ticket)
@@ -527,7 +583,7 @@ class SettingsPayload(BaseModel):
 
 
 @app.post("/settings")
-def update_settings(payload: SettingsPayload):
+def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_key)):
     """Met à jour les paramètres runtime depuis l'UI."""
     global _runtime_settings
 

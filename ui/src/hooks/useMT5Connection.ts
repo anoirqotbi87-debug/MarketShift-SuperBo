@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, Dispatch, SetStateAction } from 'react';
 import { MT5AccountState, ReconnectionState, MLModelStats, ActivePosition, ClosedTrade, LogEntry } from '../types';
+import { useMT5WebSocket, WsSnapshot } from './useMT5WebSocket';
 
 interface UseMT5ConnectionOptions {
   baseDelayMs?: number;
@@ -165,15 +166,117 @@ export function useMT5Connection(
     };
   }, [riskConfig?.useLocalBridge, riskConfig?.metaApiToken, riskConfig?.metaApiAccountId, setAccountState]);
 
-  // Local Python Bridge Data Fetcher
+  // --- WebSocket Integration ---
+  const wsUrl = React.useMemo(() => {
+    let ip = riskConfig?.localBridgeIp || `http://${window.location.hostname}:8000`;
+    return ip.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+  }, [riskConfig?.localBridgeIp]);
+
+  const handleWsSnapshot = useCallback((data: WsSnapshot) => {
+    if (data.account) {
+      setAccountState(prev => ({
+        ...prev,
+        balance: data.account!.balance,
+        equity: data.account!.equity,
+        freeMargin: data.account!.freeMargin,
+        marginLevelPct: data.account!.marginLevel,
+        broker: data.account!.broker,
+        server: data.account!.server,
+        currency: data.account!.currency,
+        accountNumber: data.account!.login?.toString() || prev.accountNumber,
+        isConnected: data.account!.isConnected,
+      }));
+    }
+
+    if (data.positions) {
+      setPositions(data.positions.map(p => ({
+        ticket: p.ticket,
+        symbol: p.symbol,
+        type: p.type,
+        lots: p.lots,
+        openPrice: p.openPrice,
+        currentPrice: p.currentPrice,
+        stopLoss: p.stopLoss,
+        takeProfit: p.takeProfit,
+        pnl: p.pnl,
+        pnlPct: p.pnlPct,
+        openTime: '',
+        magicNumber: p.magicNumber,
+        mlConfidence: 0,
+        signalReason: 'WS Sync'
+      })) as ActivePosition[]);
+
+      // Update unrealized PnL from positions sum
+      const unrealized = data.positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+      setAccountState(prev => ({ ...prev, unrealizedPnL: unrealized }));
+    }
+
+    if (data.signals) {
+      const eurusdSig = data.signals['EURUSD'] || Object.values(data.signals)[0];
+      if (eurusdSig) {
+        setMlStats(prev => ({
+          ...prev,
+          currentSignal: {
+            ...prev.currentSignal,
+            direction: eurusdSig.direction,
+            confidence: eurusdSig.confidence,
+            features: [
+              { name: eurusdSig.source, impact: 0.40 },
+              ...prev.currentSignal.features.slice(0, 5)
+            ]
+          }
+        }));
+      }
+    }
+
+    if (data.ml) {
+      setMlStats(prev => ({
+        ...prev,
+        accuracy: data.ml!.accuracy,
+        f1Score: data.ml!.accuracy, // Approximation since F1 isn't calculated separately yet
+        lastRetrained: data.ml!.lastTrained || prev.lastRetrained,
+      }));
+    }
+
+    if (data.logs && data.logs.length > 0) {
+      setLogs(prev => {
+        const mappedLogs = data.logs!.map((l: any, i) => ({
+          id: l.id ? `ws-log-${l.id}` : `ws-log-${i}-${l.timestamp}-${l.message}`,
+          timestamp: l.timestamp,
+          level: l.level as any,
+          module: l.module,
+          message: l.message
+        }));
+        
+        // Deduplicate using ID
+        const prevIds = new Set(prev.map(l => l.id));
+        const newLogs = mappedLogs.filter(l => !prevIds.has(l.id));
+        
+        if (newLogs.length === 0) return prev;
+        
+        const localLogs = prev.filter(l => l.module !== 'PYTHON_BRIDGE');
+        return [...newLogs, ...localLogs].slice(0, 150);
+      });
+    }
+  }, [setAccountState, setPositions, setMlStats, setLogs]);
+
+  const { status: wsStatus, forceReconnect: wsForceReconnect } = useMT5WebSocket({
+    url: wsUrl,
+    onSnapshot: handleWsSnapshot,
+    enabled: riskConfig?.useLocalBridge === true,
+  });
+  // -----------------------------
+
+  // Local Python Bridge Data Fetcher (HTTP Fallback)
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
     const fetchLocalBridge = async () => {
-      if (!riskConfig?.useLocalBridge) return;
+      // ONLY run polling if WebSocket is in fallback mode or disabled
+      if (!riskConfig?.useLocalBridge || wsStatus !== 'fallback_polling') return;
       
       try {
-        let ip = riskConfig.localBridgeIp || "127.0.0.1:8000";
+        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
         // ensure format has http://
         if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
           ip = 'http://' + ip;
@@ -193,6 +296,9 @@ export function useMT5Connection(
             server: data.server || prev.server,
             currency: data.currency || prev.currency,
             accountNumber: data.login?.toString() || prev.accountNumber,
+            unrealizedPnL: data.unrealizedPnL !== undefined ? data.unrealizedPnL : prev.unrealizedPnL,
+            dailyPnL: data.dailyPnL !== undefined ? data.dailyPnL : prev.dailyPnL,
+            dailyPnLPct: data.dailyPnLPct !== undefined ? data.dailyPnLPct : prev.dailyPnLPct,
             isConnected: true
           }));
           
@@ -201,28 +307,21 @@ export function useMT5Connection(
           // --- AI ML Prediction Fetch ---
           try {
             const mlStart = performance.now();
-            const predRes = await fetch(`${ip}/predict?symbol=EURUSD`);
-            if (predRes.ok) {
-              const predData = await predRes.json();
+            const statusRes = await fetch(`${ip}/ml/status`);
+            if (statusRes.ok) {
+              const statusData = await statusRes.json();
               const mlEnd = performance.now();
               setMlStats(prev => ({
                 ...prev,
                 inferenceTimeMs: Number((mlEnd - mlStart).toFixed(1)),
-                lastRetrained: new Date().toLocaleTimeString(),
-                currentSignal: {
-                  ...prev.currentSignal,
-                  symbol: 'EURUSD',
-                  direction: predData.signal,
-                  confidence: predData.confidence,
-                  features: [
-                    { name: predData.reason || 'Analyse Technique MT5', impact: 0.40 },
-                    ...prev.currentSignal.features.slice(0, 5)
-                  ]
-                }
+                lastRetrained: statusData.lastTrained || prev.lastRetrained,
+                accuracy: statusData.accuracy || prev.accuracy,
+                f1Score: statusData.accuracy || prev.f1Score,
+                // On garde currentSignal tel quel car on le met à jour avec le websocket
               }));
             }
           } catch (e) {
-            console.error("ML Predict Error:", e);
+            console.error("ML Status Error:", e);
           }
           // ------------------------------
           
@@ -231,7 +330,7 @@ export function useMT5Connection(
             const posRes = await fetch(`${ip}/positions`);
             if (posRes.ok) {
               const posData = await posRes.json();
-              setPositions(posData);
+              setPositions(Array.isArray(posData) ? posData : []);
             }
           } catch (e) {
             console.error("Positions Fetch Error:", e);
@@ -242,7 +341,7 @@ export function useMT5Connection(
             const histRes = await fetch(`${ip}/history`);
             if (histRes.ok) {
               const histData = await histRes.json();
-              setClosedTrades(histData);
+              setClosedTrades(Array.isArray(histData) ? histData : []);
             }
           } catch (e) {
             console.error("History Fetch Error:", e);
@@ -253,7 +352,8 @@ export function useMT5Connection(
             const logsRes = await fetch(`${ip}/logs`);
             if (logsRes.ok) {
               const logsData = await logsRes.json();
-              const mappedLogs = logsData.map((l: any, i: number) => ({
+              const safeLogs = Array.isArray(logsData) ? logsData : [];
+              const mappedLogs = safeLogs.map((l: any, i: number) => ({
                 id: `server-log-${i}-${l.timestamp}`,
                 timestamp: l.timestamp,
                 level: l.level || 'INFO',
@@ -299,10 +399,40 @@ export function useMT5Connection(
 
   // Synchronize RiskConfig with Python Backend
   useEffect(() => {
+    let historyInterval: NodeJS.Timeout;
+    const fetchHistoryOnly = async () => {
+      if (!riskConfig?.useLocalBridge) return;
+      try {
+        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
+        if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
+          ip = 'http://' + ip;
+        }
+        const histRes = await fetch(`${ip}/history`);
+        if (histRes.ok) {
+          const histData = await histRes.json();
+          setClosedTrades(Array.isArray(histData) ? histData : []);
+        }
+      } catch (e) {
+        console.error("WebSocket Mode - History Fetch Error:", e);
+      }
+    };
+
+    if (riskConfig?.useLocalBridge) {
+      fetchHistoryOnly(); // Initial fetch
+      historyInterval = setInterval(fetchHistoryOnly, 15000); // 15s refresh
+    }
+    
+    return () => {
+      if (historyInterval) clearInterval(historyInterval);
+    };
+  }, [riskConfig?.useLocalBridge, riskConfig?.localBridgeIp, setClosedTrades]);
+
+  // Synchronize RiskConfig with Python Backend
+  useEffect(() => {
     if (!riskConfig?.useLocalBridge || !riskConfig?.localBridgeIp) return;
     const syncSettings = async () => {
       try {
-        let ip = riskConfig.localBridgeIp || "127.0.0.1:8000";
+        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
         if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
         
         const payload = {
@@ -315,7 +445,10 @@ export function useMT5Connection(
 
         const res = await fetch(`${ip}/settings`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+          },
           body: JSON.stringify(payload)
         });
         
@@ -358,12 +491,15 @@ export function useMT5Connection(
   const executeTrade = async (symbol: string, direction: 'BUY' | 'SELL') => {
     if (!riskConfig?.useLocalBridge) return;
     try {
-      let ip = riskConfig.localBridgeIp || "127.0.0.1:8000";
+      let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
       if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
       
       const res = await fetch(`${ip}/trade`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+        },
         body: JSON.stringify({ symbol, direction })
       });
       
@@ -384,12 +520,15 @@ export function useMT5Connection(
   const closePosition = async (ticket: number) => {
     if (!riskConfig?.useLocalBridge) return;
     try {
-      let ip = riskConfig.localBridgeIp || "127.0.0.1:8000";
+      let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
       if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
       
       const res = await fetch(`${ip}/close`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+        },
         body: JSON.stringify({ ticket })
       });
       
@@ -411,6 +550,7 @@ export function useMT5Connection(
     forceReconnect,
     simulateDisconnect,
     executeTrade,
-    closePosition
+    closePosition,
+    wsStatus
   };
 }

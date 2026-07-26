@@ -96,9 +96,9 @@ export const MarketNews: React.FC<MarketNewsProps> = ({ onApplyNewsWeightToML })
     return newsList.filter(item => {
       const matchesSymbol = selectedSymbol === 'ALL' || item.relatedSymbol === selectedSymbol;
       const matchesSearch = searchQuery.trim() === '' || 
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.source.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.summary.toLowerCase().includes(searchQuery.toLowerCase());
+        (item.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.source || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.summary || '').toLowerCase().includes(searchQuery.toLowerCase());
       return matchesSymbol && matchesSearch;
     });
   }, [newsList, selectedSymbol, searchQuery]);

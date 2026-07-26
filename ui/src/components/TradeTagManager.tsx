@@ -19,8 +19,9 @@ export const PRESET_TAGS = [
   '#TrendFollow'
 ];
 
-export const getTagStyle = (tag: string) => {
-  const normalized = tag.toLowerCase();
+export const getTagStyle = (tag: string | undefined | null) => {
+  if (!tag) return 'bg-slate-800 text-slate-300 border-slate-700/80 hover:bg-slate-700';
+  const normalized = String(tag).toLowerCase();
   if (normalized.includes('scalp')) {
     return 'bg-amber-950/80 text-amber-300 border-amber-700/80 hover:bg-amber-900';
   }

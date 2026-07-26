@@ -1,5 +1,3 @@
-import { signOut } from 'firebase/auth';
-import { auth } from '../firebase';
 import React, { useState } from 'react';
 import { ViewMode, ThemeMode, MT5AccountState, RiskConfig } from '../types';
 import { LogOut, ShieldAlert, Cpu, FileText, Smartphone, RefreshCw, Zap, WifiOff, AlertTriangle, Play, Radio, Sun, Moon, Contrast, Fingerprint, ChevronDown, Settings2, Wifi, Radio as WsRadio } from 'lucide-react';
@@ -53,16 +51,16 @@ export const Header: React.FC<HeaderProps> = ({
 
   const toggleTheme = () => {
     if (!setThemeMode) return;
-    if (themeMode === 'neon_synthwave') {
-      setThemeMode('arctic_light');
-    } else if (themeMode === 'arctic_light') {
+    if (themeMode === 'vanguard_obsidian') {
+      setThemeMode('lumina_clean');
+    } else if (themeMode === 'lumina_clean') {
+      setThemeMode('deep_ocean');
+    } else if (themeMode === 'deep_ocean') {
+      setThemeMode('goldman_prestige');
+    } else if (themeMode === 'goldman_prestige') {
       setThemeMode('monochrome_terminal');
-    } else if (themeMode === 'monochrome_terminal') {
-      setThemeMode('high_contrast_pro');
-    } else if (themeMode === 'high_contrast_pro') {
-      setThemeMode('cyber_dark');
     } else {
-      setThemeMode('neon_synthwave');
+      setThemeMode('vanguard_obsidian');
     }
   };
 
@@ -129,6 +127,15 @@ export const Header: React.FC<HeaderProps> = ({
                 Plan
               </button>
             </div>
+            {/* Settings button on Mobile (moved here for absolute top-right visibility) */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="md:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-700/50 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50 hover:text-white transition-all shadow-sm font-bold text-xs"
+              title="Paramètres de l'application"
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>PARAMÈTRES</span>
+            </button>
           </div>
 
           {/* Center: Main View Toggle Desktop */}
@@ -158,7 +165,17 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Right Status Controls */}
-          <div className="flex items-center gap-2.5 w-full md:w-auto justify-end font-mono">
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end font-mono mt-2 md:mt-0">
+
+            {/* Settings Button (Desktop Only - Mobile is in logo row) */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-700/50 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50 hover:text-white transition-all shadow-sm font-bold text-xs"
+              title="Paramètres de l'application"
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>PARAMÈTRES</span>
+            </button>
 
             {/* WebSocket Status Indicator */}
             {wsStatus && (
@@ -196,8 +213,8 @@ export const Header: React.FC<HeaderProps> = ({
               title={accountState.isConnected ? 'Cliquer pour simuler une déconnexion MT5' : 'Cliquer pour forcer la reconnexion immédiatement'}
             >
               <span className={`w-2 h-2 rounded-full ${accountState.isConnected ? 'bg-emerald-400 status-glow' : 'bg-red-500 animate-ping'}`} />
-              <span>{accountState.isConnected ? accountState.broker : 'DÉCONNECTÉ'}</span>
-              <span className="text-slate-600">|</span>
+              <span className="hidden sm:inline">{accountState.isConnected ? accountState.broker : 'DÉCONNECTÉ'}</span>
+              <span className="hidden sm:inline text-slate-600">|</span>
               {accountState.isConnected ? (
                 <span className="text-emerald-400 font-bold">{accountState.pingMs}ms</span>
               ) : (
@@ -226,7 +243,7 @@ export const Header: React.FC<HeaderProps> = ({
               title="Cliquer pour basculer entre Paper Trading (Démo) et Compte Réel MT5"
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>{accountState.isPaperTrading ? 'PAPER DEMO' : 'COMPTE RÉEL'}</span>
+              <span className="hidden sm:inline">{accountState.isPaperTrading ? 'PAPER DEMO' : 'COMPTE RÉEL'}</span>
             </button>
 
             {/* Theme Mode Toggler Menu */}
@@ -234,32 +251,32 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
-                  themeMode === 'neon_synthwave'
-                    ? 'bg-fuchsia-950/50 border-fuchsia-500 text-fuchsia-300 hover:bg-fuchsia-900 shadow-fuchsia-500/20'
-                    : themeMode === 'arctic_light'
-                    ? 'bg-white border-slate-300 text-slate-800 hover:bg-slate-50 shadow-sm'
+                  themeMode === 'lumina_clean'
+                    ? 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50 shadow-sm'
+                    : themeMode === 'deep_ocean'
+                    ? 'bg-[#0d1b2a] border-[#415a77] text-[#e0e1dd] hover:bg-[#1b263b] shadow-sm'
+                    : themeMode === 'goldman_prestige'
+                    ? 'bg-[#0a0a0a] border-[#D4AF37]/30 text-[#D4AF37] hover:bg-[#151515] shadow-sm'
                     : themeMode === 'monochrome_terminal'
                     ? 'bg-black border-green-800 text-green-400 hover:bg-green-950/20 shadow-green-500/20'
-                    : themeMode === 'high_contrast_pro'
-                    ? 'bg-indigo-950 border-indigo-500 text-indigo-300 hover:bg-indigo-900 shadow-indigo-500/20'
-                    : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300'
+                    : 'bg-[#14171c] hover:bg-[#1e2329] border-white/10 text-slate-300'
                 }`}
                 title="Choisir le thème"
               >
-                {themeMode === 'high_contrast_pro' ? (
-                  <>
-                    <Contrast className="w-3.5 h-3.5 text-indigo-400" />
-                    <span className="hidden lg:inline">PRO</span>
-                  </>
-                ) : themeMode === 'neon_synthwave' ? (
-                  <>
-                    <Sun className="w-3.5 h-3.5 text-fuchsia-400" />
-                    <span className="hidden lg:inline">NEON</span>
-                  </>
-                ) : themeMode === 'arctic_light' ? (
+                {themeMode === 'lumina_clean' ? (
                   <>
                     <Sun className="w-3.5 h-3.5 text-slate-500" />
-                    <span className="hidden lg:inline">ARCTIC</span>
+                    <span className="hidden lg:inline">LUMINA</span>
+                  </>
+                ) : themeMode === 'deep_ocean' ? (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-[#e0e1dd]" />
+                    <span className="hidden lg:inline">OCEAN</span>
+                  </>
+                ) : themeMode === 'goldman_prestige' ? (
+                  <>
+                    <Contrast className="w-3.5 h-3.5 text-[#D4AF37]" />
+                    <span className="hidden lg:inline">GOLDMAN</span>
                   </>
                 ) : themeMode === 'monochrome_terminal' ? (
                   <>
@@ -268,8 +285,8 @@ export const Header: React.FC<HeaderProps> = ({
                   </>
                 ) : (
                   <>
-                    <Moon className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="hidden lg:inline">DARK</span>
+                    <Moon className="w-3.5 h-3.5 text-slate-300" />
+                    <span className="hidden lg:inline">VANGUARD</span>
                   </>
                 )}
                 <ChevronDown className="w-3.5 h-3.5 ml-1" />
@@ -279,10 +296,10 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="absolute top-full mt-2 right-0 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-xl overflow-hidden z-50">
                   <div className="p-1">
                     {[
-                      { id: 'cyber_dark', icon: Moon, label: 'Cyber Dark' },
-                      { id: 'high_contrast_pro', icon: Contrast, label: 'High Contrast Pro' },
-                      { id: 'neon_synthwave', icon: Sun, label: 'Neon Synthwave' },
-                      { id: 'arctic_light', icon: Sun, label: 'Arctic Light' },
+                      { id: 'vanguard_obsidian', icon: Moon, label: 'Vanguard Obsidian' },
+                      { id: 'lumina_clean', icon: Sun, label: 'Lumina Clean' },
+                      { id: 'deep_ocean', icon: Moon, label: 'Deep Ocean' },
+                      { id: 'goldman_prestige', icon: Contrast, label: 'Goldman Prestige' },
                       { id: 'monochrome_terminal', icon: Cpu, label: 'Mono Terminal' },
                     ].map((theme) => {
                       const Icon = theme.icon;
@@ -306,15 +323,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               )}
             </div>
-
-            {/* Settings Button */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-1.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-all shadow-sm"
-              title="Paramètres de l'application"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
 
             {/* Emergency Circuit Breaker Kill Switch / Reset Button */}
             <button

@@ -28,11 +28,26 @@ class PositionSizer:
     MAX_RISK_PCT = 0.02         # Max 2% du capital par trade
     MIN_HISTORY_TRADES = 20     # Nombre minimum de trades pour calculer le Kelly
 
-    def __init__(self):
+    def __init__(self, db_session=None):
         self._trade_history: List[dict] = []
         self._win_rate: float = self.DEFAULT_WIN_RATE
         self._rr_ratio: float = self.DEFAULT_RR_RATIO
+        self.db = db_session
         logging.info("[PositionSizer] Initialisé avec Kelly Fractionnaire (25%)")
+        
+        if self.db:
+            self._load_from_db()
+
+    def _load_from_db(self):
+        try:
+            from infrastructure.models import TradeRecord
+            records = self.db.query(TradeRecord).filter(TradeRecord.profit != None).all()
+            if records:
+                self._trade_history = [{'pnl': r.profit} for r in records]
+                self._recalculate_stats()
+                logging.info(f"[PositionSizer] {len(records)} trades historiques chargés depuis la base de données.")
+        except Exception as e:
+            logging.error(f"[PositionSizer] Erreur lors du chargement de la base de données : {e}")
 
     def update_history(self, closed_trades: List[dict]) -> None:
         """
@@ -118,19 +133,25 @@ class PositionSizer:
         Returns:
             float: Le volume en lots (arrondi à 2 décimales, minimum 0.01)
         """
-        kelly_pct = self.compute_kelly_fraction()
-        capital_at_risk = account.balance * kelly_pct
+        from decimal import Decimal, ROUND_HALF_DOWN
+        
+        kelly_pct = Decimal(str(self.compute_kelly_fraction()))
+        balance = Decimal(str(account.balance))
+        capital_at_risk = balance * kelly_pct
 
-        effective_sl_pips = sl_pips if sl_pips and sl_pips > 0 else 20.0
+        effective_sl_pips = Decimal(str(sl_pips if sl_pips and sl_pips > 0 else 20.0))
+        d_pip_value = Decimal(str(pip_value))
 
         # Volume = Capital risqué / (SL en pips × Valeur du pip)
-        if pip_value > 0 and effective_sl_pips > 0:
-            raw_volume = capital_at_risk / (effective_sl_pips * pip_value)
+        if d_pip_value > Decimal('0') and effective_sl_pips > Decimal('0'):
+            raw_volume = capital_at_risk / (effective_sl_pips * d_pip_value)
         else:
-            raw_volume = self.MIN_VOLUME
+            raw_volume = Decimal(str(self.MIN_VOLUME))
 
         # Arrondir à 2 décimales et appliquer les limites
-        volume = round(max(self.MIN_VOLUME, raw_volume), 2)
+        min_vol = Decimal(str(self.MIN_VOLUME))
+        volume = max(min_vol, raw_volume).quantize(Decimal('.01'), rounding=ROUND_HALF_DOWN)
+        volume = float(volume)  # Conversion finale pour MT5 qui attend un float
 
         logging.info(
             f"[PositionSizer] Signal={signal.source} | "

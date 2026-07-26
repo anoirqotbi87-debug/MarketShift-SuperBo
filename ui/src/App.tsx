@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ViewMode, ThemeMode, MT5AccountState, ActivePosition, ClosedTrade, MLModelStats, RiskConfig, LogEntry } from './types';
 import { auth, db, isMockConfig } from './firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+// Mock User type since firebase is removed
+interface User {
+  uid: string;
+  email: string;
+}
 import { LoginScreen } from './components/LoginScreen';
 import { Header } from './components/Header';
 import { MainAppView } from './components/MainAppView';
@@ -17,17 +20,17 @@ export default function App() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('simulator');
 
-  // Theme Mode ('cyber_dark' | 'high_contrast_pro') with localStorage persistence
+  // Theme Mode ('vanguard_obsidian' | 'lumina_clean' | 'deep_ocean' | 'goldman_prestige' | 'monochrome_terminal') with localStorage persistence
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     try {
       const saved = localStorage.getItem('marketshift_theme_mode');
-      if (saved && ['high_contrast_pro', 'cyber_dark', 'neon_synthwave', 'arctic_light', 'monochrome_terminal'].includes(saved)) {
+      if (saved && ['vanguard_obsidian', 'lumina_clean', 'deep_ocean', 'goldman_prestige', 'monochrome_terminal'].includes(saved)) {
         return saved as ThemeMode;
       }
     } catch {
       // fallback if localStorage disabled
     }
-    return 'neon_synthwave';
+    return 'vanguard_obsidian';
   });
 
   // Apply theme class to document root for global CSS overrides
@@ -38,18 +41,19 @@ export default function App() {
       // ignore
     }
     
-    document.documentElement.classList.remove('theme-high-contrast', 'theme-neon-synthwave', 'theme-arctic-light', 'theme-monochrome-terminal');
+    document.documentElement.classList.remove('theme-lumina-clean', 'theme-deep-ocean', 'theme-goldman-prestige', 'theme-monochrome-terminal');
     
     // Add current theme class
-    if (themeMode === 'high_contrast_pro') {
-      document.documentElement.classList.add('theme-high-contrast');
-    } else if (themeMode === 'neon_synthwave') {
-      document.documentElement.classList.add('theme-neon-synthwave');
-    } else if (themeMode === 'arctic_light') {
-      document.documentElement.classList.add('theme-arctic-light');
+    if (themeMode === 'lumina_clean') {
+      document.documentElement.classList.add('theme-lumina-clean');
+    } else if (themeMode === 'deep_ocean') {
+      document.documentElement.classList.add('theme-deep-ocean');
+    } else if (themeMode === 'goldman_prestige') {
+      document.documentElement.classList.add('theme-goldman-prestige');
     } else if (themeMode === 'monochrome_terminal') {
       document.documentElement.classList.add('theme-monochrome-terminal');
     }
+    // vanguard_obsidian is the default, no class needed
   }, [themeMode]);
 
   // MT5 Account State
@@ -97,7 +101,12 @@ export default function App() {
   const [riskConfig, setRiskConfig] = useState<RiskConfig>(() => {
     try {
       const saved = localStorage.getItem('marketshift_risk_config');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        parsed.useLocalBridge = true;
+        parsed.localBridgeIp = `http://${window.location.hostname}:8000`;
+        return parsed;
+      }
     } catch {
       // fallback
     }
@@ -113,7 +122,9 @@ export default function App() {
       useKellyCriterion: true,
       circuitBreakerActive: false,
       enableNewsSentimentFilter: true,
-      minNewsSentimentScore: -0.60
+      minNewsSentimentScore: -0.60,
+      useLocalBridge: true,
+      localBridgeIp: `http://${window.location.hostname}:8000`
     };
   });
 
@@ -165,7 +176,7 @@ export default function App() {
     ]);
   };
 
-  const { forceReconnect, simulateDisconnect, executeTrade, closePosition } = useMT5Connection(
+  const { forceReconnect, simulateDisconnect, executeTrade, closePosition, wsStatus } = useMT5Connection(
     accountState,
     setAccountState,
     riskConfig,
@@ -231,20 +242,9 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser && db) {
-        // Load data from Firestore
-        const docRef = doc(db, 'users', currentUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.riskConfig) setRiskConfig(data.riskConfig);
-        }
-      }
-      setAuthLoading(false);
-    });
-    return unsubscribe;
+    // Mock auth logic
+    setUser({ uid: 'mock-user-123', email: 'demo@example.com' } as User);
+    setAuthLoading(false);
   }, []);
 
   // Save risk config to firestore when it changes (debounce could be added, but simplistic for now)
@@ -257,8 +257,9 @@ export default function App() {
 
     if (isMockConfig || !db) return;
     
+    // Removed firebase write logic
     if (user && !authLoading) {
-      setDoc(doc(db, 'users', user.uid), { riskConfig }, { merge: true }).catch(console.error);
+      console.log('Would save to firestore:', riskConfig);
     }
   }, [riskConfig, user, authLoading]);
 
@@ -284,6 +285,7 @@ export default function App() {
         onResetCircuitBreaker={handleResetCircuitBreaker}
         onForceReconnect={forceReconnect}
         onSimulateDisconnect={simulateDisconnect}
+        wsStatus={wsStatus}
       />
 
       {/* Main View Area */}
