@@ -1,50 +1,70 @@
-import os
 import logging
-from dotenv import load_dotenv
+from typing import List
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Charger les variables d'environnement
-load_dotenv()
-
-
-class Config:
-    ENVIRONMENT  = os.getenv("ENVIRONMENT", "development")
-    ACTIVE_BROKER = os.getenv("ACTIVE_BROKER", "xm").upper()
-    SIMULATION_MODE = os.getenv("SIMULATION_MODE", "true").lower() == "true"
+class AppConfig(BaseSettings):
+    ENVIRONMENT: str = Field("development")
+    ACTIVE_BROKER: str = Field("xm")
+    SIMULATION_MODE: bool = Field(True)
+    API_SECRET_KEY: str = Field("marketshift_dev_secret_key_2026")
 
     # ── Multi-Symbole ─────────────────────────────────────────────────────────
-    TRADING_SYMBOLS: list = [
-        s.strip() for s in
-        os.getenv("TRADING_SYMBOLS", "EURUSD,GBPUSD,USDJPY,XAUUSD").split(",")
-        if s.strip()
-    ]
-    MAX_POSITIONS: int = int(os.getenv("MAX_POSITIONS", 5))
+    TRADING_SYMBOLS_RAW: str = Field(
+        default="EURUSD,GBPUSD,USDJPY,XAUUSD", 
+        validation_alias="TRADING_SYMBOLS"
+    )
+    MAX_POSITIONS: int = Field(5, ge=1)
 
     # ── Risk settings ────────────────────────────────────────────────────────
-    MAX_DAILY_LOSS_PCT           = float(os.getenv("MAX_DAILY_LOSS_PCT", 0.05))
-    MAX_RISK_PER_TRADE_PCT       = float(os.getenv("MAX_RISK_PER_TRADE_PCT", 0.01))
-    EMERGENCY_CLOSE_ENABLED      = os.getenv("EMERGENCY_CLOSE_ENABLED", "true").lower() == "true"
-    CIRCUIT_BREAKER_MAX_VIOLATIONS = int(os.getenv("CIRCUIT_BREAKER_MAX_VIOLATIONS", 5))
+    MAX_DAILY_LOSS_PCT: float = Field(0.05, ge=0.0, le=1.0)
+    MAX_RISK_PER_TRADE_PCT: float = Field(0.01, ge=0.0, le=1.0)
+    EMERGENCY_CLOSE_ENABLED: bool = Field(True)
+    CIRCUIT_BREAKER_MAX_VIOLATIONS: int = Field(5, ge=1)
 
     # ── ATR SL/TP Multipliers ────────────────────────────────────────────────
-    ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", 1.5))
-    ATR_TP_MULTIPLIER = float(os.getenv("ATR_TP_MULTIPLIER", 2.5))
+    ATR_SL_MULTIPLIER: float = Field(1.5, ge=0.1)
+    ATR_TP_MULTIPLIER: float = Field(2.5, ge=0.1)
 
     # ── ML ────────────────────────────────────────────────────────────────────
-    ML_CONFIDENCE_THRESHOLD = float(os.getenv("ML_CONFIDENCE_THRESHOLD", 0.60))
+    ML_CONFIDENCE_THRESHOLD: float = Field(0.60, ge=0.0, le=1.0)
 
+    # ── Credentials ───────────────────────────────────────────────────────────
+    XM_LOGIN: str = Field("")
+    XM_PASSWORD: str = Field("")
+    XM_SERVER: str = Field("XMGlobal-MT5Real")
+    
+    EXNESS_LOGIN: str = Field("")
+    EXNESS_PASSWORD: str = Field("")
+    EXNESS_SERVER: str = Field("")
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
+
+    @property
+    def TRADING_SYMBOLS(self) -> List[str]:
+        return [s.strip() for s in self.TRADING_SYMBOLS_RAW.split(",") if s.strip()]
+
+    @field_validator('ACTIVE_BROKER', mode='after')
     @classmethod
-    def get_broker_credentials(cls):
+    def upper_broker(cls, v):
+        return v.upper()
+
+    def get_broker_credentials(self):
         """Récupère les identifiants du broker actif."""
-        if cls.ACTIVE_BROKER == "XM":
-            login    = os.getenv("XM_LOGIN", "")
-            password = os.getenv("XM_PASSWORD", "")
-            server   = os.getenv("XM_SERVER", "XMGlobal-MT5Real")
-        elif cls.ACTIVE_BROKER == "EXNESS":
-            login    = os.getenv("EXNESS_LOGIN", "")
-            password = os.getenv("EXNESS_PASSWORD", "")
-            server   = os.getenv("EXNESS_SERVER", "")
+        if self.ACTIVE_BROKER == "XM":
+            login = self.XM_LOGIN
+            password = self.XM_PASSWORD
+            server = self.XM_SERVER
+        elif self.ACTIVE_BROKER == "EXNESS":
+            login = self.EXNESS_LOGIN
+            password = self.EXNESS_PASSWORD
+            server = self.EXNESS_SERVER
         else:
-            logging.error(f"Broker inconnu: {cls.ACTIVE_BROKER}")
+            logging.error(f"Broker inconnu: {self.ACTIVE_BROKER}")
             return 0, "", ""
 
         try:
@@ -53,3 +73,9 @@ class Config:
         except ValueError:
             logging.error("Le login MT5 doit être un nombre")
             return 0, password, server
+
+try:
+    Config = AppConfig()
+except Exception as e:
+    logging.critical(f"Erreur fatale de configuration (.env invalide) : {e}")
+    raise

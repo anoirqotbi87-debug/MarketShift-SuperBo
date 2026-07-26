@@ -29,9 +29,9 @@ export const ArchitectureDocView: React.FC = () => {
   };
 
   const filteredSections = ARCHITECTURE_SECTIONS.filter(sec => 
-    sec.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sec.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    sec.subsections.some(sub => sub.title.toLowerCase().includes(searchQuery.toLowerCase()))
+    (sec.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (sec.summary || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+    sec.subsections.some(sub => (sub.title || '').toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (

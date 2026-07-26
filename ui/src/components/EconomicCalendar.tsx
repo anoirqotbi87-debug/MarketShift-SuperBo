@@ -127,9 +127,9 @@ export const EconomicCalendar: React.FC<EconomicCalendarProps> = ({ onAutoTradin
       const matchImpact = selectedImpact === 'ALL' || e.impact === selectedImpact;
       const matchCurrency = selectedCurrency === 'ALL' || e.currency === selectedCurrency;
       const matchSearch = searchQuery.trim() === '' || 
-        e.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        e.country.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        e.currency.toLowerCase().includes(searchQuery.toLowerCase());
+        (e.title || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+        (e.country || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (e.currency || '').toLowerCase().includes(searchQuery.toLowerCase());
 
       return matchImpact && matchCurrency && matchSearch;
     });

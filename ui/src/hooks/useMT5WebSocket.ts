@@ -25,6 +25,13 @@ export interface WsSnapshot {
     rrRatio: number;
     tradeCount: number;
   };
+  ml?: {
+    trained: boolean;
+    accuracy: number;
+    sampleCount: number;
+    lastTrained: string | null;
+    featureImportances: Record<string, number>;
+  };
   logs?: WsLog[];
   killSwitch?: boolean;
   isPaused?: boolean;
@@ -34,13 +41,14 @@ export interface WsPosition {
   ticket: number;
   symbol: string;
   type: 'BUY' | 'SELL';
-  volume: number;
+  lots: number;
   openPrice: number;
   currentPrice: number;
-  profit: number;
-  sl: number;
-  tp: number;
-  magic: number;
+  pnl: number;
+  pnlPct: number;
+  stopLoss: number;
+  takeProfit: number;
+  magicNumber: number;
 }
 
 export interface WsSignal {

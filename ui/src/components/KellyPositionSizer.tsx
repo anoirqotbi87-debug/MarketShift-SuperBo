@@ -17,6 +17,7 @@ interface KellyPositionSizerProps {
   kellyStats?: KellyStats | null;
   localBridgeIp?: string;
   isConnected?: boolean;
+  maxRiskPct?: number; // e.g. 2 for 2%
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ export const KellyPositionSizer: React.FC<KellyPositionSizerProps> = ({
   kellyStats,
   localBridgeIp,
   isConnected = false,
+  maxRiskPct = 2.0,
 }) => {
   const [stats, setStats] = useState<KellyStats | null>(kellyStats || null);
 
@@ -56,7 +58,7 @@ export const KellyPositionSizer: React.FC<KellyPositionSizerProps> = ({
     const b = rrRatio;
     if (b <= 0) return 0;
     const rawKelly = Math.max(0, (p * b - q) / b);
-    return Math.min(rawKelly * 0.25, 0.02); // 25% fractionnaire, max 2%
+    return Math.min(rawKelly * 0.25, maxRiskPct / 100); // 25% fractionnaire, maxRiskPct
   }
 
   const kellyFrac = stats ? (stats.kellyFraction ?? computeKellyFraction(stats.winRate, stats.rrRatio)) : 0;
@@ -65,9 +67,9 @@ export const KellyPositionSizer: React.FC<KellyPositionSizerProps> = ({
   const hasEnoughData = stats && stats.tradeCount >= 20;
 
   const getKellyColor = (pct: number) => {
-    if (pct >= 5)  return { bar: 'bg-red-500',    text: 'text-red-400',    label: 'TROP ÉLEVÉ' };
-    if (pct >= 2)  return { bar: 'bg-amber-500',  text: 'text-amber-400',  label: 'PRUDENCE' };
-    if (pct >= 1)  return { bar: 'bg-emerald-500', text: 'text-emerald-400', label: 'OPTIMAL' };
+    if (pct >= maxRiskPct)  return { bar: 'bg-red-500',    text: 'text-red-400',    label: 'TROP ÉLEVÉ' };
+    if (pct >= maxRiskPct * 0.75)  return { bar: 'bg-amber-500',  text: 'text-amber-400',  label: 'PRUDENCE' };
+    if (pct >= maxRiskPct * 0.25)  return { bar: 'bg-emerald-500', text: 'text-emerald-400', label: 'OPTIMAL' };
     return              { bar: 'bg-indigo-500',   text: 'text-indigo-400',  label: 'CONSERVATEUR' };
   };
 
@@ -143,16 +145,16 @@ export const KellyPositionSizer: React.FC<KellyPositionSizerProps> = ({
         <div className="relative w-full h-3 bg-slate-900 rounded-full overflow-hidden">
           <div
             className={`absolute left-0 top-0 h-full ${colors.bar} rounded-full transition-all duration-700`}
-            style={{ width: `${Math.min(kellyPct * 10, 100)}%` }}
+            style={{ width: `${Math.min((kellyPct / Math.max(maxRiskPct, 5)) * 100, 100)}%` }}
           />
-          {/* Marqueur 2% = danger */}
-          <div className="absolute top-0 h-full w-px bg-red-500/60" style={{ left: '20%' }} />
+          {/* Marqueur max = danger */}
+          <div className="absolute top-0 h-full w-px bg-red-500/60" style={{ left: `${(maxRiskPct / Math.max(maxRiskPct, 5)) * 100}%` }} />
         </div>
 
         <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
           <span>0%</span>
-          <span className="text-red-400/60">⚠ 2%</span>
-          <span>10%+</span>
+          <span className="text-red-400/60">⚠ Max {maxRiskPct}%</span>
+          <span>{Math.max(maxRiskPct, 5).toFixed(0)}%+</span>
         </div>
 
         {/* Badge statut */}

@@ -173,25 +173,78 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
   ];
 
   return (
-    <div className="w-full h-full min-h-screen pb-20">
+    <div className="w-full h-full min-h-screen bg-transparent md:flex md:flex-row">
       
       {/* Toast Notification Overlay for Price Alerts */}
       <PriceAlertToastOverlay toasts={activeToasts} onDismiss={handleDismissToast} />
+
+      {/* 2026 Adaptive Navigation: Sidebar (Desktop) / Bottom Bar (Mobile) */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 p-2 sm:p-4 pb-4 sm:pb-6 pointer-events-none md:pointer-events-auto md:static md:w-24 md:h-screen md:p-0 md:bg-slate-950 md:border-r md:border-slate-800 md:flex md:flex-col md:items-center md:py-6">
+        
+        {/* Desktop Brand Logo / Status */}
+        <div className="hidden md:flex flex-col items-center mb-8 gap-2">
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${accountState.isConnected ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+            <span className={`w-3 h-3 rounded-full ${accountState.isConnected ? 'bg-emerald-400 status-glow' : 'bg-red-500'}`} />
+          </div>
+        </div>
+
+        <div className="max-w-md mx-auto pointer-events-auto md:max-w-none md:w-full md:flex-1 md:flex md:flex-col md:gap-4 md:px-3 md:justify-center">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl flex items-center justify-between px-2 py-2 shadow-2xl shadow-indigo-900/20 md:bg-transparent md:border-none md:shadow-none md:flex-col md:gap-6 md:px-0">
+            {bottomNav.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as ActiveTabSimulator)}
+                  className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all min-w-[64px] md:w-full md:p-3 md:hover:bg-slate-900/50 ${
+                    isActive
+                      ? 'text-indigo-400 md:bg-slate-900/80 md:border md:border-slate-800'
+                      : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-indigo-600/20 md:bg-transparent' : 'bg-transparent'}`}>
+                    <Icon className={`w-5 h-5 ${isActive ? 'scale-110 drop-shadow-md' : 'scale-100'}`} />
+                  </div>
+                  <span className={`text-[9px] font-semibold tracking-wide ${isActive ? 'font-bold' : ''}`}>
+                    {tab.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Desktop Bottom Action (Export) */}
+        <div className="hidden md:flex flex-col items-center mt-auto w-full px-3">
+          <button
+            onClick={() => setIsExportModalOpen(true)}
+            className="w-full flex justify-center p-3 text-slate-500 hover:text-indigo-400 hover:bg-slate-900/50 rounded-xl transition-all"
+            title="Exporter l'historique CSV"
+          >
+            <Download className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
       
-      {/* Main Container */}
-      <div className="flex justify-center w-full">
-        <div className="w-full max-w-7xl relative bg-slate-950">
+      {/* Main Content Area */}
+      <div className="flex-1 flex justify-center w-full md:ml-0 md:h-screen md:overflow-hidden relative">
+        <div className="w-full max-w-7xl relative bg-slate-950 md:h-full md:flex md:flex-col">
 
           {/* App Bar inside Mobile App */}
-          <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+          <div className="p-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-2 md:px-6 md:py-4">
+            <div className="flex items-center gap-2 md:hidden">
               <span className={`w-2 h-2 rounded-full ${accountState.isConnected ? 'bg-emerald-400 status-glow' : 'bg-red-500'}`} />
-              <span className="font-bold text-xs text-white uppercase tracking-tight">MARKETSHIFT PRO CONTROL</span>
+              <span className="font-bold text-xs text-white uppercase tracking-tight">MARKETSHIFT PRO</span>
+            </div>
+            
+            <div className="hidden md:flex items-center gap-3">
+              <h1 className="text-xl font-black text-white tracking-tight">MARKETSHIFT PRO <span className="text-slate-500 font-light text-sm ml-2 hidden lg:inline">INSTITUTIONAL TERMINAL</span></h1>
             </div>
 
             <div className="flex items-center gap-1.5">
               {/* Push Notification Manager Bell & Center Drawer */}
-              <PushNotificationManager />
+              <PushNotificationManager logs={logs} />
 
               <button
                 onClick={() => setIsDepositModalOpen(true)}
@@ -271,44 +324,18 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
             )}
 
             {activeTab === 'terminal_logs' && (
-              <LogsTab logs={logs} onClearLogs={handleClearLogs} />
+              <LogsTab 
+                logs={logs} 
+                onClearLogs={handleClearLogs} 
+                accountState={accountState} 
+                positions={positions} 
+              />
             )}
 
             {activeTab === 'ai_assistant' && (
               <AIAssistantTab />
             )}
           </div>
-
-          {/* 2026 Bottom Navigation Bar */}
-          <div className="fixed bottom-0 left-0 right-0 z-50 p-2 sm:p-4 pb-4 sm:pb-6 pointer-events-none">
-            <div className="max-w-md mx-auto pointer-events-auto">
-              <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl flex items-center justify-between px-2 py-2 shadow-2xl shadow-indigo-900/20">
-                {bottomNav.map((tab) => {
-                  const Icon = tab.icon;
-                  const isActive = activeTab === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id as ActiveTabSimulator)}
-                      className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all min-w-[64px] ${
-                        isActive
-                          ? 'text-indigo-400'
-                          : 'text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      <div className={`p-1.5 rounded-xl transition-all ${isActive ? 'bg-indigo-600/20' : 'bg-transparent'}`}>
-                        <Icon className={`w-5 h-5 ${isActive ? 'scale-110 drop-shadow-md' : 'scale-100'}`} />
-                      </div>
-                      <span className={`text-[9px] font-semibold tracking-wide ${isActive ? 'font-bold' : ''}`}>
-                        {tab.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
 

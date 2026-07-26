@@ -136,6 +136,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-full accent-indigo-500"
                       />
                     </div>
+
+                    <div>
+                      <label className="flex items-center justify-between text-sm text-slate-300 mb-1">
+                        <span>Seuil de Confiance ML (IA) (%)</span>
+                        <span className="font-mono text-slate-100">{localRisk.mlConfidenceThreshold || 75}%</span>
+                      </label>
+                      <input 
+                        type="range" 
+                        min="50" max="99" step="1"
+                        value={localRisk.mlConfidenceThreshold || 75}
+                        onChange={(e) => setLocalRisk({...localRisk, mlConfidenceThreshold: parseInt(e.target.value)})}
+                        className="w-full accent-fuchsia-500"
+                      />
+                    </div>
                   </div>
                 </div>
 

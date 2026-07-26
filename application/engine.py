@@ -12,19 +12,22 @@ Améliorations v2.0 :
 import time
 import logging
 import threading
+import asyncio
+import datetime
 from typing import Dict, Optional
 
 from application.state_manager import StateManager
 from application.position_sizer import PositionSizer
 from agents.kill_switch import KillSwitch
 from agents.circuit_breaker import CircuitBreaker
-from agents.order_prechecker import OrderPreCheckerAgent
+from risk.pretrade_validator import PreTradeValidator
 from core.interfaces import IBrokerConnector, OrderType, Signal
 from infrastructure.config import Config
 
 from strategies.aggregator import SignalAggregator
 from strategies.ema_crossover import EMACrossoverStrategy
 from strategies.rsi_macd import RsiMacdStrategy
+from strategies.smc_ict import SMCStrategy
 from strategies.base import StrategyBase
 
 import MetaTrader5 as mt5
@@ -34,13 +37,14 @@ from ml.predictor import MLPredictor
 
 
 class Engine:
-    def __init__(self, connector: IBrokerConnector):
+    def __init__(self, connector: IBrokerConnector, db_session=None):
         self.connector     = connector
         self.state_manager = StateManager(connector)
         self.kill_switch   = KillSwitch(connector)
         self.circuit_breaker = CircuitBreaker(self.state_manager, self.kill_switch)
-        self.prechecker    = OrderPreCheckerAgent()
-        self.position_sizer = PositionSizer()
+        self.db = db_session
+        self.pretrade_validator = PreTradeValidator(db_session=self.db)
+        self.position_sizer = PositionSizer(db_session=self.db)
 
         # Stocker les constantes MT5 à l'init pour éviter tout problème de scope
         # mt5.TIMEFRAME_M1 = 1
@@ -61,6 +65,11 @@ class Engine:
                 ),
                 RsiMacdStrategy(
                     name=f"RSI_MACD_{symbol}", weight=1.5,
+                    sl_multiplier=Config.ATR_SL_MULTIPLIER,
+                    tp_multiplier=Config.ATR_TP_MULTIPLIER
+                ),
+                SMCStrategy(
+                    name=f"SMC_{symbol}", weight=2.0,
                     sl_multiplier=Config.ATR_SL_MULTIPLIER,
                     tp_multiplier=Config.ATR_TP_MULTIPLIER
                 )
@@ -91,13 +100,17 @@ class Engine:
             return
 
         self.running = True
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread = threading.Thread(target=self._run_async_loop_thread, daemon=True)
         self._thread.start()
 
         # Démarrer l'auto-entraînement ML en arrière-plan
         self.ml_trainer.start_auto_retrain(self.connector, self.symbols)
 
-        logging.info("[Engine] ✅ Démarré avec succès.")
+        logging.info("[Engine] ✅ Démarré avec succès en mode Asyncio.")
+
+    def _run_async_loop_thread(self):
+        """Démarre la boucle d'événements asyncio dans le thread dédié."""
+        asyncio.run(self._async_run_loop())
 
     def stop(self):
         self.running = False
@@ -107,18 +120,23 @@ class Engine:
         self.connector.disconnect()
         logging.info("[Engine] ⛔ Arrêté.")
 
-    def _run_loop(self):
-        """Boucle principale de trading multi-symbole."""
+    async def _async_run_loop(self):
+        """Boucle principale de trading multi-symbole en mode asynchrone (100% parallèle)."""
         while self.running:
             if self.kill_switch.is_triggered:
-                time.sleep(1)
+                await asyncio.sleep(1)
                 continue
 
-            # Mise à jour de l'état du compte et des positions
-            self.state_manager.update_state()
+            start_time = time.time()
+
+            # Mise à jour de l'état du compte et des positions (Bloquant mais rapide)
+            await asyncio.to_thread(self.state_manager.update_state)
 
             # Vérifications de sécurité (Circuit Breaker)
             self.circuit_breaker.check()
+
+            # Application du Trailing Stop Dynamique
+            await asyncio.to_thread(self._apply_trailing_stops)
 
             # Mise à jour du Kelly Criterion avec les trades fermés
             self._refresh_kelly_history()
@@ -126,27 +144,35 @@ class Engine:
             # Mettre à jour le seuil de confidence ML depuis les settings runtime
             self.ml_predictor.set_confidence_threshold(Config.ML_CONFIDENCE_THRESHOLD)
 
-            # ── Boucle multi-symbole ──────────────────────────────────────────
+            # ── Exécution Parallèle (Zero Latency) ────────────────────────────
+            tasks = []
             for symbol in self.symbols:
                 if self.kill_switch.is_triggered:
                     break
+                tasks.append(self._process_symbol_async(symbol))
 
-                try:
-                    self._process_symbol(symbol)
-                except Exception as e:
-                    logging.error(f"[Engine] Erreur traitement {symbol}: {e}")
+            if tasks:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for i, r in enumerate(results):
+                    if isinstance(r, Exception):
+                        logging.error(f"[Engine] Erreur asynchrone sur {self.symbols[i]}: {r}")
 
-                # Délai entre symboles pour ne pas surcharger MT5
-                time.sleep(0.5)
+            elapsed = time.time() - start_time
+            logging.debug(f"[Engine] Cycle d'analyse terminé en {elapsed:.3f}s pour {len(self.symbols)} symboles.")
 
-            # Attendre avant le prochain tick (M1)
-            time.sleep(60)
+            # Attendre précisément la prochaine minute (00s) au lieu d'un time.sleep(60) aveugle
+            now = datetime.datetime.now()
+            seconds_to_next_minute = 60 - now.second - (now.microsecond / 1_000_000.0)
+            if seconds_to_next_minute < 0.1:
+                seconds_to_next_minute += 60.0
+            
+            await asyncio.sleep(seconds_to_next_minute)
 
-    def _process_symbol(self, symbol: str):
-        """Traite un symbole : données → signal → ML → sizing → exécution."""
-        # 1. Récupérer les données OHLCV M1 (200 bougies pour ML features)
+    async def _process_symbol_async(self, symbol: str):
+        """Traite un symbole de manière asynchrone : données → signal → ML → sizing → exécution."""
+        # 1. Récupérer les données OHLCV M1 (Offload au ThreadPool pour ne pas bloquer l'Event Loop)
         # On utilise self._tf_m1 (stocké dans __init__) pour éviter tout problème de scope Python 3.14
-        df = self.connector.get_historical_data(symbol, self._tf_m1, 200)
+        df = await asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m1, 200)
         if df is None or df.empty:
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
@@ -174,16 +200,24 @@ class Engine:
             logging.info(f"[Engine] 🤖 Signal {signal.direction.name} {symbol} rejeté par ML.")
             return
 
-        # 5. Sanity Check RTS 6 (OrderPreChecker)
+        # 5. Sanity Check RTS 6 (PreTradeValidator)
         if not self.state_manager.account:
             return
 
-        if not self.prechecker.validate_signal(validated_signal, self.state_manager.account):
-            logging.warning(f"[Engine] ⚠️ Signal {symbol} rejeté par OrderPreChecker (RTS 6).")
+        pip_size = StrategyBase.get_pip_size(symbol)
+        
+        # Récupération du spread en temps réel
+        sym_info = await asyncio.to_thread(self.connector.get_symbol_info, symbol)
+        current_spread_pips = 1.0  # Valeur par défaut
+        if sym_info and getattr(sym_info, 'spread', None) is not None:
+            # sym_info.spread est en points, on le convertit en pips
+            current_spread_pips = sym_info.spread * (sym_info.point / pip_size)
+
+        if not self.pretrade_validator.validate_signal(validated_signal, self.state_manager.account, current_spread_pips):
+            # Le Validator gère lui-même ses propres logs d'erreurs détaillés
             return
 
         # 6. Calcul du volume via Kelly Criterion
-        pip_size = StrategyBase.get_pip_size(symbol)
         volume = self.position_sizer.compute_volume(
             signal=validated_signal,
             account=self.state_manager.account,
@@ -207,14 +241,15 @@ class Engine:
             f"ML Confidence={validated_signal.metadata.get('ml_confidence', 'N/A')}"
         )
 
-        # 8. Exécution de l'ordre
-        result = self.connector.execute_order(
-            symbol=symbol,
-            order_type=validated_signal.direction,
-            volume=volume,
-            sl=sl_price,
-            tp=tp_price,
-            magic=self._symbol_to_magic(symbol)
+        # 8. Exécution de l'ordre (Offload au ThreadPool)
+        result = await asyncio.to_thread(
+            self.connector.execute_order,
+            symbol,
+            validated_signal.direction,
+            volume,
+            sl_price,
+            tp_price,
+            self._symbol_to_magic(symbol)
         )
 
         if result:
@@ -222,6 +257,25 @@ class Engine:
                 f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
                 f"Prix: {result['price']} | Volume: {result['volume']}"
             )
+            
+            # Trace d'Audit MiFID II
+            try:
+                from utils.audit_trail import AuditTrail
+                if not hasattr(self, 'audit_trail'):
+                    self.audit_trail = AuditTrail()
+                
+                self.audit_trail.log_order({
+                    'ticket': result['ticket'],
+                    'symbol': symbol,
+                    'direction': validated_signal.direction.name,
+                    'volume': result['volume'],
+                    'price': result['price'],
+                    'sl': sl_price,
+                    'tp': tp_price,
+                    'ml_confidence': validated_signal.metadata.get('ml_confidence', 0.0)
+                })
+            except Exception as e:
+                logging.error(f"[Engine] Erreur AuditTrail : {e}")
 
     def _compute_sl_tp_prices(
         self, symbol: str, direction: OrderType,
@@ -269,14 +323,64 @@ class Engine:
             closed = []
             for d in deals:
                 if d.profit != 0:  # Ignorer les deals sans P&L
-                    closed.append({'pnl': d.profit, 'symbol': d.symbol})
+                    closed.append({'pnl': d.profit, 'symbol': d.symbol, 'ticket': d.ticket})
 
             if closed != self._closed_trades_cache:
                 self._closed_trades_cache = closed
                 self.position_sizer.update_history(closed)
+                
+                # Persistance en Base de Données SQLite
+                if self.db:
+                    try:
+                        from infrastructure.models import TradeRecord
+                        for c in closed:
+                            # Vérifier si le ticket existe déjà pour ne pas dupliquer
+                            existing = self.db.query(TradeRecord).filter(TradeRecord.ticket == c['ticket']).first()
+                            if not existing:
+                                new_record = TradeRecord(
+                                    ticket=c['ticket'],
+                                    symbol=c['symbol'],
+                                    profit=c['pnl']
+                                )
+                                self.db.add(new_record)
+                        self.db.commit()
+                    except Exception as db_err:
+                        self.db.rollback()
+                        logging.error(f"[Engine] Erreur sauvegarde DB SQLite : {db_err}")
 
         except Exception as e:
-            logging.debug(f"[Engine] Erreur refresh Kelly history: {e}")
+            logging.error(f"[Engine] Erreur Kelly historique : {e}")
+
+    def _apply_trailing_stops(self):
+        """Applique le Trailing Stop sur toutes les positions ouvertes."""
+        try:
+            from api.server import _runtime_settings
+            if not getattr(_runtime_settings, 'trailing_stop_active', False):
+                return
+            multiplier = getattr(_runtime_settings, 'trailing_stop_multiplier', 1.0)
+        except ImportError:
+            return  # Si lancé hors FastAPI
+
+        for p in self.state_manager.positions:
+            pip_size = StrategyBase.get_pip_size(p.symbol)
+            # Distance de trailing (base 20 pips * multiplicateur)
+            trail_distance = 20.0 * pip_size * multiplier
+
+            if p.type == OrderType.BUY:
+                new_sl = p.current_price - trail_distance
+                # Si le trade est profitable de + de trail_distance et que le nouveau SL est meilleur
+                if (p.current_price - p.open_price) > trail_distance and new_sl > p.sl:
+                    logging.info(f"[Engine] 🛡️ Trailing Stop (BUY) ajusté pour {p.symbol} (Ticket {p.ticket}): {p.sl:.5f} -> {new_sl:.5f}")
+                    self.connector.modify_position(p.ticket, p.symbol, new_sl)
+                    p.sl = new_sl # Maj de l'état local
+
+            elif p.type == OrderType.SELL:
+                new_sl = p.current_price + trail_distance
+                # Si le trade est profitable de + de trail_distance et que le nouveau SL est meilleur (plus bas)
+                if (p.open_price - p.current_price) > trail_distance and (new_sl < p.sl or p.sl == 0.0):
+                    logging.info(f"[Engine] 🛡️ Trailing Stop (SELL) ajusté pour {p.symbol} (Ticket {p.ticket}): {p.sl:.5f} -> {new_sl:.5f}")
+                    self.connector.modify_position(p.ticket, p.symbol, new_sl)
+                    p.sl = new_sl # Maj de l'état local
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:

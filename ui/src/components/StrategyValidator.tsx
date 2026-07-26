@@ -27,7 +27,7 @@ export const StrategyValidator: React.FC<StrategyValidatorProps> = ({
 
   // Helper to categorize features
   const getCategoryAndDesc = (name: string): { category: FeatureToggleState['category']; description: string } => {
-    const lower = name.toLowerCase();
+    const lower = (name || '').toLowerCase();
     if (lower.includes('rsi') || lower.includes('macd') || lower.includes('ema')) {
       return { category: 'TECHNICAL', description: 'Indicateurs de tendance et d\'oscillateurs de prix' };
     }

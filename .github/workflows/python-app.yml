@@ -1,0 +1,32 @@
+name: MarketShift SuperBot CI
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+
+jobs:
+  build-and-test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip' # caching pip dependencies
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Ne pas installer torch pour les tests GitHub Actions afin d'accélérer la CI
+        # car on teste uniquement la logique métier (Risk Manager, Stratégies)
+        pip install pandas numpy pydantic pydantic-settings pytest pytest-asyncio
+        
+    - name: Test with pytest
+      run: |
+        pytest tests/ -v

@@ -1,0 +1,9 @@
+{
+  "name": "marketshift-superbot-root",
+  "version": "1.0.0",
+  "description": "Root package.json to proxy commands to the ui folder",
+  "scripts": {
+    "dev": "cd ui && npm run dev",
+    "install-ui": "cd ui && npm install"
+  }
+}

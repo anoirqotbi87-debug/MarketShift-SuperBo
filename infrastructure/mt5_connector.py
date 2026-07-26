@@ -140,10 +140,31 @@ class MT5Connector(IBrokerConnector):
             
         return True
 
+    def modify_position(self, ticket: int, symbol: str, new_sl: float) -> bool:
+        """Modifie le Stop Loss d'une position existante."""
+        if not self.connected: return False
+
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "symbol": symbol,
+            "position": ticket,
+            "sl": float(new_sl)
+        }
+
+        result = mt5.order_send(request)
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            logging.error(f"Erreur modif SL position {ticket}: {result.retcode} - {result.comment}")
+            return False
+
+        return True
+
     def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[pd.DataFrame]:
         """Récupère l'historique OHLCV (Open, High, Low, Close, Volume) pour un symbole donné"""
         if not self.connected: 
             return None
+            
+        # S'assurer que le symbole est visible dans le Market Watch
+        mt5.symbol_select(symbol, True)
             
         # timeframe MT5 (ex: mt5.TIMEFRAME_M15)
         rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)

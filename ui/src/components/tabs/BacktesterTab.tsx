@@ -73,7 +73,8 @@ export const BacktesterTab: React.FC = () => {
 
       // Parse CSV headers and rows
       const parsedBars: { date: string; open: number; high: number; low: number; close: number }[] = [];
-      const startIndex = lines[0].toLowerCase().includes('open') || lines[0].toLowerCase().includes('date') ? 1 : 0;
+      const firstLine = lines[0] || '';
+      const startIndex = firstLine.toLowerCase().includes('open') || firstLine.toLowerCase().includes('date') ? 1 : 0;
 
       for (let i = startIndex; i < lines.length; i++) {
         const parts = lines[i].split(/[,;\t]/).map(p => p.trim().replace(/"/g, ''));

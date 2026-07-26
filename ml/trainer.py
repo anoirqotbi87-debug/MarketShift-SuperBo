@@ -30,12 +30,16 @@ try:
     import pandas as pd
     from xgboost import XGBClassifier
     from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import train_test_split, GridSearchCV
     from sklearn.metrics import accuracy_score
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from ml.lstm_model import LSTMPredictor, create_sequences
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
-    logging.warning("[MLTrainer] XGBoost ou scikit-learn non disponible. ML désactivé.")
+    logging.warning("[MLTrainer] XGBoost, scikit-learn ou PyTorch non disponible. ML désactivé.")
 
 
 class MLTrainer:
@@ -53,7 +57,8 @@ class MLTrainer:
     ]
 
     def __init__(self):
-        self._model: Optional[object] = None
+        self._xgb_model: Optional[object] = None
+        self._lstm_model: Optional[object] = None
         self._scaler: Optional[object] = None
         self._is_trained: bool = False
         self._accuracy: float = 0.0
@@ -200,24 +205,52 @@ class MLTrainer:
             X_train_s = scaler.fit_transform(X_train)
             X_test_s  = scaler.transform(X_test)
 
-            model = XGBClassifier(
-                n_estimators=200,
-                max_depth=5,
-                learning_rate=0.05,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                use_label_encoder=False,
-                eval_metric='logloss',
-                verbosity=0,
-                random_state=42
-            )
-            model.fit(X_train_s, y_train)
+            # 1. Grid Search XGBoost
+            logging.info("[MLTrainer] Lancement du Grid Search XGBoost...")
+            param_grid = {
+                'n_estimators': [100, 200],
+                'max_depth': [3, 5],
+                'learning_rate': [0.05, 0.1]
+            }
+            xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+            grid_search = GridSearchCV(estimator=xgb, param_grid=param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+            grid_search.fit(X_train_s, y_train)
+            
+            best_xgb = grid_search.best_estimator_
+            logging.info(f"[MLTrainer] Meilleurs paramètres XGBoost: {grid_search.best_params_}")
 
-            preds = model.predict(X_test_s)
+            # 2. Entraînement LSTM (PyTorch)
+            logging.info("[MLTrainer] Début de l'entraînement LSTM...")
+            seq_length = 10
+            X_seq, y_seq = create_sequences(X_train_s, y_train, seq_length)
+            
+            # Convert to PyTorch tensors
+            X_tensor = torch.tensor(X_seq, dtype=torch.float32)
+            y_tensor = torch.tensor(y_seq, dtype=torch.float32).unsqueeze(1)
+            
+            lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
+            criterion = nn.BCELoss()
+            optimizer = optim.Adam(lstm_model.parameters(), lr=0.001)
+            
+            epochs = 10
+            lstm_model.train()
+            for epoch in range(epochs):
+                optimizer.zero_grad()
+                outputs = lstm_model(X_tensor)
+                loss = criterion(outputs, y_tensor)
+                loss.backward()
+                optimizer.step()
+            
+            lstm_model.eval()
+            logging.info("[MLTrainer] Entraînement LSTM terminé.")
+
+            # Évaluation XGBoost seulement pour simplifier l'accuracy globale
+            preds = best_xgb.predict(X_test_s)
             accuracy = accuracy_score(y_test, preds)
 
             with self._lock:
-                self._model   = model
+                self._xgb_model  = best_xgb
+                self._lstm_model = lstm_model
                 self._scaler  = scaler
                 self._is_trained = True
                 self._accuracy   = accuracy
@@ -225,8 +258,8 @@ class MLTrainer:
                 self._last_trained = time.strftime("%Y-%m-%d %H:%M:%S")
 
             logging.info(
-                f"[MLTrainer] ✅ Modèle entraîné — Samples: {len(processed)} | "
-                f"Accuracy: {accuracy:.1%} | Dernière MAJ: {self._last_trained}"
+                f"[MLTrainer] ✅ Modèle Ensemble (XGB+LSTM) entraîné — Samples: {len(processed)} | "
+                f"XGB Accuracy: {accuracy:.1%} | Dernière MAJ: {self._last_trained}"
             )
             return True
 
@@ -239,7 +272,7 @@ class MLTrainer:
         if not self._is_trained or not ML_AVAILABLE:
             return {}
         with self._lock:
-            importances = self._model.feature_importances_
+            importances = self._xgb_model.feature_importances_
         return {
             col: float(imp)
             for col, imp in zip(self.FEATURE_COLUMNS, importances)
@@ -258,15 +291,22 @@ class MLTrainer:
         return self._sample_count
 
     @property
+    def scaler(self) -> Optional[object]:
+        return self._scaler
+
+    @property
+    def xgb_model(self) -> Optional[object]:
+        return self._xgb_model
+
+    @property
+    def lstm_model(self) -> Optional[object]:
+        return self._lstm_model
+
+    @property
     def last_trained(self) -> Optional[str]:
         return self._last_trained
 
     @property
-    def model(self):
-        with self._lock:
-            return self._model
-
-    @property
-    def scaler(self):
+    def scaler(self) -> Optional[object]:
         with self._lock:
             return self._scaler

@@ -12,6 +12,7 @@ import numpy as np
 try:
     ML_AVAILABLE = True
     import pandas as pd
+    import torch
 except ImportError:
     ML_AVAILABLE = False
 
@@ -56,43 +57,59 @@ class MLPredictor:
             return 'WAIT', 0.0, {}
 
         try:
-            model   = self._trainer.model
+            xgb_model = self._trainer.xgb_model
+            lstm_model = self._trainer.lstm_model
             scaler  = self._trainer.scaler
 
-            if model is None or scaler is None:
+            if xgb_model is None or lstm_model is None or scaler is None:
                 return 'WAIT', 0.0, {}
 
-            # Construire les features sur les dernières barres
-            features = self._build_last_features(df)
-            if features is None:
+            # Construire toutes les features pour le df
+            processed_df = self._trainer._build_features(df)
+            if processed_df is None or len(processed_df) < 10:
                 return 'WAIT', 0.0, {}
 
-            # Normaliser et prédire
-            features_scaled = scaler.transform([features])
-            proba = model.predict_proba(features_scaled)[0]
+            # Prendre les 10 dernières barres pour le LSTM
+            last_10 = processed_df[self._trainer.FEATURE_COLUMNS].values[-10:]
+            
+            # Normaliser
+            last_10_scaled = scaler.transform(last_10)
+            
+            # Prédiction XGBoost (sur la toute dernière barre)
+            xgb_proba = xgb_model.predict_proba([last_10_scaled[-1]])[0]
+            xgb_buy_conf = float(xgb_proba[1])
+            xgb_sell_conf = float(xgb_proba[0])
 
-            # proba[1] = probabilité de hausse (BUY)
-            buy_confidence  = float(proba[1])
-            sell_confidence = float(proba[0])
+            # Prédiction LSTM (sur la séquence des 10 dernières barres)
+            seq_tensor = torch.tensor([last_10_scaled], dtype=torch.float32)
+            lstm_model.eval()
+            with torch.no_grad():
+                lstm_out = lstm_model(seq_tensor).item()
+            
+            lstm_buy_conf = lstm_out
+            lstm_sell_conf = 1.0 - lstm_out
+
+            # ENSEMBLE CONSENSUS (Moyenne pondérée: 60% XGB, 40% LSTM)
+            buy_confidence = (xgb_buy_conf * 0.6) + (lstm_buy_conf * 0.4)
+            sell_confidence = (xgb_sell_conf * 0.6) + (lstm_sell_conf * 0.4)
 
             feature_importances = self._trainer.get_feature_importances()
 
             if buy_confidence >= self._confidence_threshold:
                 logging.info(
-                    f"[MLPredictor] ✅ Signal BUY validé (confidence: {buy_confidence:.1%})"
+                    f"[MLPredictor] ✅ Signal BUY validé (Ensemble: {buy_confidence:.1%} | XGB:{xgb_buy_conf:.1%} LSTM:{lstm_buy_conf:.1%})"
                 )
                 return 'BUY', buy_confidence, feature_importances
 
             elif sell_confidence >= self._confidence_threshold:
                 logging.info(
-                    f"[MLPredictor] ✅ Signal SELL validé (confidence: {sell_confidence:.1%})"
+                    f"[MLPredictor] ✅ Signal SELL validé (Ensemble: {sell_confidence:.1%} | XGB:{xgb_sell_conf:.1%} LSTM:{lstm_sell_conf:.1%})"
                 )
                 return 'SELL', sell_confidence, feature_importances
 
             else:
                 logging.debug(
-                    f"[MLPredictor] ⏸ WAIT — Buy: {buy_confidence:.1%}, "
-                    f"Sell: {sell_confidence:.1%} (seuil: {self._confidence_threshold:.1%})"
+                    f"[MLPredictor] ⏸ WAIT — Buy: {buy_confidence:.1%}, Sell: {sell_confidence:.1%} (seuil: {self._confidence_threshold:.1%})"
                 )
                 return 'WAIT', max(buy_confidence, sell_confidence), feature_importances
 
@@ -126,88 +143,21 @@ class MLPredictor:
             signal.metadata['ml_confidence'] = confidence
             signal.metadata['ml_validated'] = True
             logging.info(
-                f"[MLPredictor] ✅ Signal {signal_dir} confirmé par ML "
+                f"[MLPredictor] ✅ Signal {signal_dir} sur {signal.symbol} confirmé par ML "
                 f"(confidence: {confidence:.1%})"
             )
             return signal
 
         elif direction == 'WAIT' or direction != signal_dir:
             logging.warning(
-                f"[MLPredictor] ❌ Signal {signal_dir} REJETÉ par ML "
+                f"[MLPredictor] ❌ Signal {signal_dir} sur {signal.symbol} REJETÉ par ML "
                 f"(ML dit: {direction} @ {confidence:.1%})"
             )
             return None
 
         return signal
 
-    def _build_last_features(self, df: 'pd.DataFrame') -> Optional[list]:
-        """
-        Construit le vecteur de features pour la dernière bougie.
-        """
-        try:
-            if len(df) < 30:
-                return None
 
-            df = df.copy()
-
-            # EMA diff
-            ema9  = df['close'].ewm(span=9,  adjust=False).mean()
-            ema21 = df['close'].ewm(span=21, adjust=False).mean()
-            ema_diff = float((ema9.iloc[-1] - ema21.iloc[-1]) / df['close'].iloc[-1])
-
-            # RSI 14
-            delta = df['close'].diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rs    = gain / loss.replace(0, 1e-9)
-            rsi   = float(100 - (100 / (1 + rs)).iloc[-1])
-
-            # MACD hist
-            ema12 = df['close'].ewm(span=12, adjust=False).mean()
-            ema26 = df['close'].ewm(span=26, adjust=False).mean()
-            macd  = ema12 - ema26
-            sig   = macd.ewm(span=9, adjust=False).mean()
-            macd_hist = float((macd.iloc[-1] - sig.iloc[-1]) / df['close'].iloc[-1])
-
-            # ATR norm
-            tr = pd.concat([
-                df['high'] - df['low'],
-                (df['high'] - df['close'].shift()).abs(),
-                (df['low']  - df['close'].shift()).abs()
-            ], axis=1).max(axis=1)
-            atr_norm = float(tr.rolling(14).mean().iloc[-1] / df['close'].iloc[-1])
-
-            # Volume relatif
-            vol_col = 'tick_volume' if 'tick_volume' in df.columns else 'volume' if 'volume' in df.columns else None
-            if vol_col:
-                vol_ma = df[vol_col].rolling(20).mean().iloc[-1]
-                vol_rel = float(df[vol_col].iloc[-1] / vol_ma) if vol_ma > 0 else 1.0
-            else:
-                vol_rel = 1.0
-
-            # Heure
-            if 'time' in df.columns:
-                try:
-                    hour = pd.to_datetime(df['time'].iloc[-1]).hour
-                    hour_sin = float(np.sin(2 * np.pi * hour / 24))
-                    hour_cos = float(np.cos(2 * np.pi * hour / 24))
-                except Exception:
-                    hour_sin, hour_cos = 0.0, 1.0
-            else:
-                hour_sin, hour_cos = 0.0, 1.0
-
-            # Retours
-            close = df['close']
-            ret_1 = float(close.pct_change(1).iloc[-1])
-            ret_3 = float(close.pct_change(3).iloc[-1])
-            ret_5 = float(close.pct_change(5).iloc[-1])
-
-            return [ema_diff, rsi, macd_hist, atr_norm, vol_rel,
-                    hour_sin, hour_cos, ret_1, ret_3, ret_5]
-
-        except Exception as e:
-            logging.error(f"[MLPredictor] Erreur construction features: {e}")
-            return None
 
     @property
     def confidence_threshold(self) -> float:

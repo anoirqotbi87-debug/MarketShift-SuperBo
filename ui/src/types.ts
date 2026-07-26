@@ -1,5 +1,5 @@
 export type ViewMode = 'simulator' | 'doc';
-export type ThemeMode = 'cyber_dark' | 'high_contrast_pro' | 'neon_synthwave' | 'arctic_light' | 'monochrome_terminal';
+export type ThemeMode = 'vanguard_obsidian' | 'lumina_clean' | 'deep_ocean' | 'goldman_prestige' | 'monochrome_terminal';
 
 export type ActiveTabSimulator = 
   | 'dashboard' 
@@ -112,6 +112,7 @@ export interface RiskConfig {
   metaApiAccountId?: string;
   useLocalBridge?: boolean;
   localBridgeIp?: string;
+  mlConfidenceThreshold?: number; // e.g. 75 for 75%
 }
 
 export interface LogEntry {
