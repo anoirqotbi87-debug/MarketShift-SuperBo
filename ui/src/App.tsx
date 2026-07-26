@@ -13,6 +13,7 @@ import { ArchitectureDocView } from './components/ArchitectureDocView';
 import { useMT5Connection } from './hooks/useMT5Connection';
 import { ReconnectionToast } from './components/ReconnectionToast';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Toaster } from 'sonner';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -271,6 +272,9 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
       
+      {/* Global Alerts */}
+      <Toaster theme="dark" position="top-right" richColors />
+
       {/* App Header */}
       <Header
         viewMode={viewMode}
