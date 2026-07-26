@@ -193,6 +193,18 @@ def _build_ws_snapshot() -> dict:
                 "broker":      "XM" if "XM" in acc.server else "EXNESS",
                 "isConnected": True,
             }
+        else:
+            account_data = {
+                "login":       0,
+                "balance":     0,
+                "equity":      0,
+                "freeMargin":  0,
+                "marginLevel": 0,
+                "currency":    "USD",
+                "server":      "Veuillez ouvrir MT5 (No IPC)",
+                "broker":      "MT5 Terminal Error",
+                "isConnected": True,
+            }
 
         # Positions
         positions_data = [
