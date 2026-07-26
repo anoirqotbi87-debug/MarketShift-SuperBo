@@ -169,9 +169,9 @@ class Backtester:
                 self.balance += profit
                 self.closed_trades.append({'pnl': profit})
                 
-        return self._generate_report()
+        return self._generate_report(symbol)
         
-    def _generate_report(self) -> dict:
+    def _generate_report(self, symbol: str) -> dict:
         total_trades = len(self.orders)
         if total_trades == 0:
             return {"error": "Aucun trade exécuté."}
@@ -182,30 +182,80 @@ class Backtester:
         gross_profit = sum(o.profit for o in winning_trades)
         gross_loss = abs(sum(o.profit for o in losing_trades))
         net_profit = gross_profit - gross_loss
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
         
-        win_rate = len(winning_trades) / total_trades
+        win_rate = (len(winning_trades) / total_trades) * 100
         
         # Max Drawdown
         equity_series = pd.Series(self.equity_curve)
         rolling_max = equity_series.expanding().max()
         drawdown = (equity_series - rolling_max) / rolling_max
-        max_drawdown = drawdown.min() * 100 # en pourcentage
+        max_drawdown_pct = abs(drawdown.min() * 100) # positif en pourcentage
+        
+        max_drawdown_dollar = (rolling_max - equity_series).max()
         
         # Sharpe Ratio (simplifié)
         returns = equity_series.pct_change().dropna()
         if returns.std() != 0:
-            sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252 * 24 * 60) # Annualisé (1min)
+            sharpe_ratio = (returns.mean() / returns.std()) * np.sqrt(252 * 24 * 60)
         else:
             sharpe_ratio = 0.0
 
+        avg_win = gross_profit / len(winning_trades) if winning_trades else 0
+        avg_loss = gross_loss / len(losing_trades) if losing_trades else 0
+
+        # Construction de l'equity curve frontend
+        eq_curve = []
+        peak = self.initial_balance
+        for i, eq in enumerate(self.equity_curve):
+            if eq > peak: peak = eq
+            dd_pct = ((peak - eq) / peak) * 100
+            eq_curve.append({
+                "bar": i,
+                "date": f"Bar {i}",
+                "equity": round(eq, 2),
+                "peak": round(peak, 2),
+                "drawdownPct": round(dd_pct, 2)
+            })
+
+        # Construction des trades
+        trade_history = []
+        eq_tracker = self.initial_balance
+        for o in self.orders:
+            eq_tracker += o.profit
+            trade_history.append({
+                "id": o.ticket,
+                "date": str(o.open_time),
+                "type": o.type.name,
+                "entryPrice": round(o.open_price, 5),
+                "exitPrice": round(o.close_price if o.close_price else 0.0, 5),
+                "pnl": round(o.profit, 2),
+                "pnlPct": round((o.profit / self.initial_balance) * 100, 2),
+                "equityAfter": round(eq_tracker, 2),
+                "drawdownPct": 0.0,
+                "reason": "Signal SMC+ML"
+            })
+
         return {
-            "initial_balance": self.initial_balance,
-            "final_balance": self.balance,
-            "net_profit": net_profit,
-            "profit_factor": profit_factor,
-            "win_rate": win_rate,
-            "total_trades": total_trades,
-            "max_drawdown_pct": max_drawdown,
-            "sharpe_ratio": sharpe_ratio
+            "symbol": symbol,
+            "strategyName": "SMC + XGBoost WFO",
+            "initialCapital": self.initial_balance,
+            "finalCapital": round(self.balance, 2),
+            "netProfit": round(net_profit, 2),
+            "returnPct": round((net_profit / self.initial_balance) * 100, 2),
+            "totalTrades": total_trades,
+            "winningTrades": len(winning_trades),
+            "losingTrades": len(losing_trades),
+            "winRate": round(win_rate, 2),
+            "profitFactor": round(profit_factor, 2),
+            "sharpeRatio": round(sharpe_ratio, 2),
+            "maxDrawdownPct": round(max_drawdown_pct, 2),
+            "maxDrawdownDollar": round(max_drawdown_dollar, 2),
+            "avgWin": round(avg_win, 2),
+            "avgLoss": round(avg_loss, 2),
+            "maxConsecutiveWins": 0,
+            "maxConsecutiveLosses": 0,
+            "equityCurve": eq_curve,
+            "trades": trade_history,
+            "sourceName": "CSV Backtest"
         }
