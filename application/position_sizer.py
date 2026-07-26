@@ -60,10 +60,12 @@ class PositionSizer:
     def _recalculate_stats(self) -> None:
         """Recalcule le win rate et le ratio R/R à partir de l'historique."""
         if len(self._trade_history) < self.MIN_HISTORY_TRADES:
-            logging.debug(
-                f"[PositionSizer] Historique insuffisant ({len(self._trade_history)} trades), "
-                f"utilisation des valeurs par défaut."
+            logging.warning(
+                f"[PositionSizer] Historique insuffisant ({len(self._trade_history)} trades). "
+                f"DÉSACTIVATION DU KELLY. Utilisation du volume minimal de sécurité."
             )
+            self._win_rate = 0.0 # Force le Kelly à 0
+            self._rr_ratio = 1.0
             return
 
         winners = [t for t in self._trade_history if t.get('pnl', 0) > 0]

@@ -8,9 +8,11 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - API_KEY=SuperSecretKey123!
+      - API_KEY=${API_KEY}
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
     volumes:
       - ./logs:/app/logs
     # Optionnel: si vous avez un broker mock ou une DB, vous pouvez configurer le réseau ici.
