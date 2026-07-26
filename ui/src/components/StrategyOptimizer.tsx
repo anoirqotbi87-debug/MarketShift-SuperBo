@@ -182,22 +182,52 @@ export const StrategyOptimizer: React.FC<StrategyOptimizerProps> = ({ mlStats, o
       .slice(0, 5);
   }, [gridData, metric]);
 
-  // Execute Grid Search simulation
-  const handleRunOptimization = () => {
+  // Execute Grid Search (Real API Call)
+  const handleRunOptimization = async () => {
     setIsOptimizing(true);
     setOptimizationProgress(0);
     setAppliedSuccessMessage(null);
 
+    // Fake progress bar while waiting for backend
     let prog = 0;
     const interval = setInterval(() => {
-      prog += 20;
+      prog += 5;
+      if (prog > 95) prog = 95;
       setOptimizationProgress(prog);
-      if (prog >= 100) {
-        clearInterval(interval);
-        setIsOptimizing(false);
-        setSelectedCell(optimalCellCoords);
+    }, 500);
+
+    try {
+      // Create FormData to send to FastAPI
+      const formData = new FormData();
+      formData.append('symbol', 'EURUSD#'); // or get from context
+      formData.append('initial_capital', '10000.0');
+
+      const res = await fetch(`http://${window.location.hostname}:8000/optimize`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      
+      if (data.error) {
+        console.error("Optimization Error:", data.error);
+        setAppliedSuccessMessage(`Erreur: ${data.error}`);
+      } else {
+        // Here we could update the grid data with the actual results
+        // For now, we just show success and stop the spinner
+        console.log("Optimization Result:", data);
+        setAppliedSuccessMessage(`Optimisation terminée! Meilleur Sharpe: ${data.sharpeRatio || 'N/A'}`);
       }
-    }, 250);
+    } catch (err) {
+      console.error("Optimization Fetch Error:", err);
+      setAppliedSuccessMessage("Erreur de connexion au serveur d'optimisation.");
+    } finally {
+      clearInterval(interval);
+      setOptimizationProgress(100);
+      setTimeout(() => {
+        setIsOptimizing(false);
+      }, 500);
+    }
   };
 
   // Apply selected hyperparameter set
