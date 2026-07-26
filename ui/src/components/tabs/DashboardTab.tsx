@@ -12,6 +12,7 @@ import { MarketCorrelationHeatmap } from '../MarketCorrelationHeatmap';
 import { MarketDepthChart } from '../MarketDepthChart';
 import { PortfolioHealthMonitor } from '../PortfolioHealthMonitor';
 import { PositionDistributionChart } from '../PositionDistributionChart';
+import { LiveKPIWidget } from '../LiveKPIWidget';
 import { FeatureImpactChart } from '../FeatureImpactChart';
 import { StrategyValidator } from '../StrategyValidator';
 import { PriceAlertsConfig } from '../PriceAlertsConfig';
@@ -317,6 +318,9 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Live KPIs (Expectancy, Profit Factor) */}
+      <LiveKPIWidget />
 
       {/* Modern iOS-Style Segmented Control for Sub-Tabs */}
       <div className="flex justify-center w-full mt-2 mb-4">
