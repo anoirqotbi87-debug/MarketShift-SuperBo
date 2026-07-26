@@ -715,5 +715,46 @@ def get_kpi_metrics():
             "total_trades": len(trades)
         }
     except Exception as e:
-        logging.error(f"[API] Erreur calcul KPIs : {e}")
+        return {"error": str(e)}
+
+from fastapi import File, UploadFile, Form
+import pandas as pd
+import io
+
+@app.post("/backtest")
+async def run_historical_backtest(
+    file: UploadFile = File(...),
+    symbol: str = Form("EURUSD"),
+    initial_capital: float = Form(10000.0)
+):
+    """
+    Exécute un backtest historique réel sur le CSV fourni par l'utilisateur.
+    """
+    try:
+        # Lire le contenu du fichier
+        content = await file.read()
+        
+        # Charger avec Pandas (en essayant de deviner le format)
+        try:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')))
+        except Exception:
+            df = pd.read_csv(io.StringIO(content.decode('utf-8')), sep=';')
+            
+        # Nettoyage des colonnes basique
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        if 'open' not in df.columns or 'close' not in df.columns:
+            return {"error": "Le CSV doit contenir au moins les colonnes 'open' et 'close'."}
+            
+        # Lancer le backtest
+        from application.backtester import Backtester
+        
+        logging.info(f"[API] Lancement Backtest pour {symbol} sur {len(df)} bougies uploadées.")
+        tester = Backtester(initial_balance=initial_capital)
+        report = tester.run(df, symbol)
+        
+        return report
+        
+    except Exception as e:
+        logging.error(f"[API] Erreur Backtest : {e}")
         return {"error": str(e)}

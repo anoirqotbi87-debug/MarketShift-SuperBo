@@ -115,165 +115,42 @@ export const BacktesterTab: React.FC = () => {
     downloadCSV(`Modele_Donnees_MT5_${symbol}.csv`, [headers, ...sampleRows].join('\n'));
   };
 
-  // Core Simulation Function (Calculates Drawdown & Sharpe Ratio)
-  const runBacktestSimulation = () => {
+  // Core Simulation Function (Calls FastAPI Backend)
+  const runBacktestSimulation = async () => {
+    if (!fileInputRef.current?.files?.[0]) {
+      alert("Veuillez d'abord uploader un fichier CSV contenant l'historique MT5.");
+      return;
+    }
+
     setIsLoading(true);
+    
+    try {
+      const file = fileInputRef.current.files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('symbol', symbol);
+      formData.append('initial_capital', initialCapital.toString());
 
-    setTimeout(() => {
-      let capital = initialCapital;
-      let peakEquity = capital;
-      let maxDrawdownDollar = 0;
-      let maxDrawdownPct = 0;
-
-      const trades: BacktestTrade[] = [];
-      const equityCurve: { bar: number; date: string; equity: number; peak: number; drawdownPct: number }[] = [];
-
-      // Initial point
-      equityCurve.push({ bar: 0, date: 'Départ', equity: capital, peak: capital, drawdownPct: 0 });
-
-      // Determine bars source
-      const barsToUse = csvRawBars && csvRawBars.length > 5 
-        ? csvRawBars 
-        : Array.from({ length: 80 }, (_, i) => ({
-            date: `2026-05-${(i % 30 + 1).toString().padStart(2, '0')} ${((i * 3) % 24).toString().padStart(2, '0')}:00`,
-            open: 1.0800 + Math.sin(i * 0.2) * 0.0050 + (i * 0.00015),
-            high: 1.0820 + Math.sin(i * 0.2) * 0.0050 + (i * 0.00015),
-            low: 1.0780 + Math.sin(i * 0.2) * 0.0050 + (i * 0.00015),
-            close: 1.0810 + Math.sin(i * 0.21) * 0.0050 + (i * 0.00015),
-          }));
-
-      // Calculate daily returns for Sharpe Ratio
-      const returnsList: number[] = [];
-      let consecutiveWins = 0;
-      let consecutiveLosses = 0;
-      let maxConsecutiveWins = 0;
-      let maxConsecutiveLosses = 0;
-      let grossProfit = 0;
-      let grossLoss = 0;
-
-      // Simulate trading decisions across bars
-      barsToUse.forEach((bar, idx) => {
-        // Trade trigger condition every 2-3 bars
-        if (idx > 2 && idx % 2 === 0) {
-          const type: 'BUY' | 'SELL' = (idx % 5 === 0 || idx % 7 === 0) ? 'SELL' : 'BUY';
-          const riskAmount = capital * (riskPerTradePct / 100);
-
-          // Win probability driven by strategy + simulated market noise
-          const winProbability = strategy.includes('XGBoost') ? 0.65 : 0.58;
-          const isWin = Math.random() < winProbability;
-
-          const pnl = isWin 
-            ? riskAmount * (takeProfitPips / stopLossPips)
-            : -riskAmount;
-
-          const pnlPct = (pnl / capital) * 100;
-          capital += pnl;
-
-          // Returns for Sharpe calculation
-          returnsList.push(pnl / (capital - pnl));
-
-          // Drawdown computation
-          if (capital > peakEquity) {
-            peakEquity = capital;
-          }
-          const currentDD = ((peakEquity - capital) / peakEquity) * 100;
-          const currentDDDollar = peakEquity - capital;
-
-          if (currentDD > maxDrawdownPct) maxDrawdownPct = currentDD;
-          if (currentDDDollar > maxDrawdownDollar) maxDrawdownDollar = currentDDDollar;
-
-          // Win/Loss streaks
-          if (isWin) {
-            grossProfit += pnl;
-            consecutiveWins++;
-            consecutiveLosses = 0;
-            if (consecutiveWins > maxConsecutiveWins) maxConsecutiveWins = consecutiveWins;
-          } else {
-            grossLoss += Math.abs(pnl);
-            consecutiveLosses++;
-            consecutiveWins = 0;
-            if (consecutiveLosses > maxConsecutiveLosses) maxConsecutiveLosses = consecutiveLosses;
-          }
-
-          const entryPrice = bar.open;
-          const exitPrice = type === 'BUY' 
-            ? entryPrice + (isWin ? takeProfitPips * 0.0001 : -stopLossPips * 0.0001)
-            : entryPrice - (isWin ? takeProfitPips * 0.0001 : -stopLossPips * 0.0001);
-
-          trades.push({
-            id: trades.length + 1,
-            date: bar.date,
-            type,
-            entryPrice: Number(entryPrice.toFixed(5)),
-            exitPrice: Number(exitPrice.toFixed(5)),
-            pnl: Number(pnl.toFixed(2)),
-            pnlPct: Number(pnlPct.toFixed(2)),
-            equityAfter: Number(capital.toFixed(2)),
-            drawdownPct: Number(currentDD.toFixed(2)),
-            reason: isWin ? `TP Atteint (+${takeProfitPips}pips)` : `SL Déclenché (-${stopLossPips}pips)`
-          });
-
-          equityCurve.push({
-            bar: trades.length,
-            date: bar.date.slice(5, 16),
-            equity: Number(capital.toFixed(2)),
-            peak: Number(peakEquity.toFixed(2)),
-            drawdownPct: Number((-currentDD).toFixed(2)) // Negative for drawdown chart area
-          });
-        }
+      const res = await fetch('http://localhost:8000/backtest', {
+        method: 'POST',
+        body: formData,
       });
 
-      // Sharpe Ratio Calculation
-      // Formula: (Mean Return - Risk Free Rate) / StdDev(Returns) * sqrt(252)
-      const meanReturn = returnsList.length > 0 
-        ? returnsList.reduce((a, b) => a + b, 0) / returnsList.length 
-        : 0;
+      const data = await res.json();
       
-      const variance = returnsList.length > 1
-        ? returnsList.reduce((acc, r) => acc + Math.pow(r - meanReturn, 2), 0) / (returnsList.length - 1)
-        : 0;
-      
-      const stdDev = Math.sqrt(variance);
-      const riskFreeRatePerTrade = 0.02 / 252; // 2% annual risk-free rate
-      const sharpeRatio = stdDev > 0 
-        ? Number((((meanReturn - riskFreeRatePerTrade) / stdDev) * Math.sqrt(252)).toFixed(2))
-        : 0;
+      if (!res.ok || data.error) {
+        alert(`Erreur Backtest: ${data.error || 'Erreur serveur inconnue'}`);
+        setIsLoading(false);
+        return;
+      }
 
-      const winningTrades = trades.filter(t => t.pnl > 0);
-      const losingTrades = trades.filter(t => t.pnl <= 0);
-      const winRate = trades.length > 0 ? Number(((winningTrades.length / trades.length) * 100).toFixed(1)) : 0;
-      const profitFactor = grossLoss > 0 ? Number((grossProfit / grossLoss).toFixed(2)) : grossProfit > 0 ? 99.0 : 0;
-      const avgWin = winningTrades.length > 0 ? grossProfit / winningTrades.length : 0;
-      const avgLoss = losingTrades.length > 0 ? grossLoss / losingTrades.length : 0;
-      const netProfit = capital - initialCapital;
-      const returnPct = (netProfit / initialCapital) * 100;
-
-      setResult({
-        symbol,
-        strategyName: strategy,
-        initialCapital,
-        finalCapital: Number(capital.toFixed(2)),
-        netProfit: Number(netProfit.toFixed(2)),
-        returnPct: Number(returnPct.toFixed(2)),
-        totalTrades: trades.length,
-        winningTrades: winningTrades.length,
-        losingTrades: losingTrades.length,
-        winRate,
-        profitFactor,
-        sharpeRatio,
-        maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
-        maxDrawdownDollar: Number(maxDrawdownDollar.toFixed(2)),
-        avgWin: Number(avgWin.toFixed(2)),
-        avgLoss: Number(avgLoss.toFixed(2)),
-        maxConsecutiveWins,
-        maxConsecutiveLosses,
-        equityCurve,
-        trades,
-        sourceName: uploadedFileName || `Génération Historique M15 MT5 (${symbol})`
-      });
-
+      setResult(data as BacktestResult);
+    } catch (err) {
+      console.error("Backtest Error:", err);
+      alert("Impossible de contacter le serveur Python FastAPI.");
+    } finally {
       setIsLoading(false);
-    }, 600);
+    }
   };
 
   // Export Backtest Trades to CSV
