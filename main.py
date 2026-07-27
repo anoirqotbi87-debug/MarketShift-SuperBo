@@ -30,24 +30,31 @@ def main():
         exness_login = 0
     exness_connector = MT5Connector(exness_login, Config.EXNESS_PASSWORD, Config.EXNESS_SERVER)
 
+    import sys
+    print("Step 1: Router"); sys.stdout.flush()
     # Routeur Haute Disponibilité
     from infrastructure.broker_router import BrokerRouter
     router = BrokerRouter(primary=xm_connector, fallback=exness_connector)
 
+    print("Step 2: DB Session"); sys.stdout.flush()
     db_session = SessionLocal()
     engine = Engine(router, db_session=db_session)
     
+    print("Step 3: init_api"); sys.stdout.flush()
     # Injection de l'engine dans l'API
     init_api(engine)
     
+    print("Step 4: engine.start()"); sys.stdout.flush()
     # Démarrage de l'engine (Thread)
     engine.start()
     
+    print("Step 5: Surveillance"); sys.stdout.flush()
     # Démarrage de l'Agent de Surveillance Institutionnel
     from monitoring.surveillance_agent import SurveillanceAgent
     surveillance = SurveillanceAgent(engine)
     surveillance.start()
     
+    print("Step 6: Uvicorn"); sys.stdout.flush()
     # Démarrage serveur API (Bloquant)
     logging.info("Démarrage du serveur API sur http://0.0.0.0:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")

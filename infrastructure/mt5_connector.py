@@ -26,15 +26,18 @@ class MT5Connector(IBrokerConnector):
             return False
             
         with self._lock:
-            if not mt5.initialize():
+            # We must pass the credentials to initialize() as well. 
+            if self.login > 0 and self.password and self.server:
+                init_res = mt5.initialize(login=self.login, password=self.password, server=self.server)
+            else:
+                init_res = mt5.initialize()
+
+            if not init_res:
                 logging.error(f"Echec initialisation MT5, code: {mt5.last_error()}")
                 return False
                 
-            if self.login > 0 and self.password and self.server:
-                authorized = mt5.login(self.login, password=self.password, server=self.server)
-                if not authorized:
-                    logging.error(f"Echec de connexion MT5 au compte {self.login}")
-                    return False
+            # mt5.initialize with credentials already authorizes the account.
+            # Calling mt5.login() again immediately after hangs the terminal.
                     
         self.connected = True
         logging.info(f"Connecté à MT5 avec succès (Serveur: {self.server})")
@@ -51,6 +54,7 @@ class MT5Connector(IBrokerConnector):
         if not self.connected: return None
         
         with self._lock:
+            mt5.initialize()
             info = mt5.account_info()
         if info is None: return None
         
@@ -68,6 +72,7 @@ class MT5Connector(IBrokerConnector):
         if not self.connected: return []
         
         with self._lock:
+            mt5.initialize()
             if symbol:
                 positions = mt5.positions_get(symbol=symbol)
             else:
@@ -95,6 +100,7 @@ class MT5Connector(IBrokerConnector):
         if not self.connected: return None
         
         with self._lock:
+            mt5.initialize()
             symbol_info = mt5.symbol_info(symbol)
             if symbol_info is None or not symbol_info.visible:
                 logging.error(f"Symbol {symbol} non visible/invalide")
@@ -119,6 +125,7 @@ class MT5Connector(IBrokerConnector):
         }
         
         with self._lock:
+            mt5.initialize()
             result = mt5.order_send(request)
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logging.error(f"Erreur envoi ordre: {result.retcode} - {result.comment}")
@@ -130,6 +137,7 @@ class MT5Connector(IBrokerConnector):
         if not self.connected: return False
         
         with self._lock:
+            mt5.initialize()
             position = mt5.positions_get(ticket=ticket)
             if position is None or len(position) == 0:
                 return False
@@ -153,6 +161,7 @@ class MT5Connector(IBrokerConnector):
         }
         
         with self._lock:
+            mt5.initialize()
             result = mt5.order_send(request)
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logging.error(f"Erreur clôture position: {result.retcode} - {result.comment}")
@@ -172,6 +181,7 @@ class MT5Connector(IBrokerConnector):
         }
 
         with self._lock:
+            mt5.initialize()
             result = mt5.order_send(request)
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logging.error(f"Erreur modif SL position {ticket}: {result.retcode} - {result.comment}")
@@ -185,6 +195,7 @@ class MT5Connector(IBrokerConnector):
             return None
             
         with self._lock:
+            mt5.initialize()
             # S'assurer que le symbole est visible dans le Market Watch
             mt5.symbol_select(symbol, True)
                 

@@ -97,10 +97,11 @@ class Engine:
         )
 
     def start(self):
+        # 1. Initialize MT5 in the MAIN thread (prevents deadlock)
         if not self.connector.connect():
-            logging.error("[Engine] Échec de connexion au broker. Engine non démarré.")
+            logging.error("[Engine] Échec de connexion au broker (Main Thread).")
             return
-
+            
         self.running = True
         self._thread = threading.Thread(target=self._run_async_loop_thread, daemon=True)
         self._thread.start()
@@ -112,6 +113,11 @@ class Engine:
 
     def _run_async_loop_thread(self):
         """Démarre la boucle d'événements asyncio dans le thread dédié."""
+        if not self.connector.connect():
+            logging.error("[Engine] Échec de connexion au broker dans le thread dédié.")
+            self.running = False
+            return
+            
         asyncio.run(self._async_run_loop())
 
     def stop(self):
@@ -135,13 +141,13 @@ class Engine:
             start_time = time.time()
 
             # Mise à jour de l'état du compte et des positions (Bloquant mais rapide)
-            await asyncio.to_thread(self.state_manager.update_state)
+            self.state_manager.update_state()
 
             # Vérifications de sécurité (Circuit Breaker)
             self.circuit_breaker.check()
 
             # Application du Trailing Stop Dynamique
-            await asyncio.to_thread(self._apply_trailing_stops)
+            self._apply_trailing_stops()
 
             # Mise à jour du Kelly Criterion avec les trades fermés
             self._refresh_kelly_history()
@@ -177,7 +183,7 @@ class Engine:
         """Traite un symbole de manière asynchrone : données → signal → ML → sizing → exécution."""
         # 1. Récupérer les données OHLCV M1 (Offload au ThreadPool pour ne pas bloquer l'Event Loop)
         # On utilise self._tf_m1 (stocké dans __init__) pour éviter tout problème de scope Python 3.14
-        df = await asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m1, 200)
+        df = self.connector.get_historical_data(symbol, self._tf_m1, 200)
         if df is None or df.empty:
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
@@ -212,17 +218,14 @@ class Engine:
         pip_size = StrategyBase.get_pip_size(symbol)
         
         # Récupération du spread en temps réel
-        sym_info = await asyncio.to_thread(self.connector.get_symbol_info, symbol)
+        sym_info = self.connector.get_symbol_info(symbol)
         current_spread_pips = 1.0  # Valeur par défaut
         if sym_info and getattr(sym_info, 'spread', None) is not None:
             # sym_info.spread est en points, on le convertit en pips
             current_spread_pips = sym_info.spread * (sym_info.point / pip_size)
 
         # Offload SQLAlchemy queries to a background thread to prevent blocking the async loop
-        is_valid = await asyncio.to_thread(
-            self.pretrade_validator.validate_signal,
-            validated_signal, self.state_manager.account, current_spread_pips
-        )
+        is_valid = self.pretrade_validator.validate_signal(validated_signal, self.state_manager.account, current_spread_pips)
         if not is_valid:
             # Le Validator gère lui-même ses propres logs d'erreurs détaillés
             return
@@ -418,8 +421,7 @@ class Engine:
                 payload = await self.order_queue.get()
                 
                 # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent)
-                result = await asyncio.to_thread(
-                    self.connector.execute_order,
+                result = self.connector.execute_order(
                     payload['symbol'],
                     payload['direction'],
                     payload['volume'],

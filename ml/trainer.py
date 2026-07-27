@@ -86,6 +86,11 @@ class MLTrainer:
 
     def _auto_retrain_loop(self) -> None:
         """Boucle de ré-entraînement toutes les RETRAIN_INTERVAL_HOURS."""
+        # MUST initialize MT5 in this background thread context
+        if not self._connector.connect():
+            logging.error("[MLTrainer] Impossible d'initialiser MT5 dans le thread ML.")
+            return
+
         while self._running:
             self._collect_and_train()
             time.sleep(self.RETRAIN_INTERVAL_HOURS * 3600)
