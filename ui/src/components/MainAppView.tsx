@@ -175,13 +175,13 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
   ];
 
   return (
-    <div className="w-full h-full min-h-screen bg-transparent md:flex md:flex-row">
+    <div className="w-full h-full bg-transparent md:flex md:flex-row">
       
       {/* Toast Notification Overlay for Price Alerts */}
       <PriceAlertToastOverlay toasts={activeToasts} onDismiss={handleDismissToast} />
 
       {/* 2026 Adaptive Navigation: Sidebar (Desktop) / Bottom Bar (Mobile) */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 p-2 sm:p-4 pb-4 sm:pb-6 pointer-events-none md:pointer-events-auto md:static md:w-24 md:h-screen md:p-0 md:bg-slate-950 md:border-r md:border-slate-800 md:flex md:flex-col md:items-center md:py-6">
+      <div className="fixed bottom-0 left-0 right-0 z-50 p-2 sm:p-4 pb-4 sm:pb-6 pointer-events-none md:pointer-events-auto md:static md:w-24 md:h-full md:p-0 md:bg-slate-950 md:border-r md:border-slate-800 md:flex md:flex-col md:items-center md:py-6">
         
         {/* Desktop Brand Logo / Status */}
         <div className="hidden md:flex flex-col items-center mb-8 gap-2">
@@ -230,7 +230,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
       </div>
       
       {/* Main Content Area */}
-      <div className="flex-1 flex justify-center w-full md:ml-0 md:h-screen md:overflow-hidden relative">
+      <div className="flex-1 flex justify-center w-full md:ml-0 md:h-full md:overflow-hidden relative">
         <div className="w-full max-w-7xl relative bg-slate-950 md:h-full md:flex md:flex-col">
 
           {/* App Bar inside Mobile App */}
