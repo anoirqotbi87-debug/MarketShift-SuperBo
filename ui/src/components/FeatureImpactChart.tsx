@@ -90,7 +90,7 @@ export const FeatureImpactChart: React.FC<FeatureImpactChartProps> = ({ mlStats 
         <div className="flex items-center gap-2 font-mono text-xs">
           <div className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-xl flex items-center gap-1.5">
             <span className="text-slate-400 text-[10px]">Précision:</span>
-            <span className="font-bold text-emerald-400">{mlStats.accuracy}%</span>
+            <span className="font-bold text-emerald-400">{(mlStats.accuracy * 100).toFixed(1)}%</span>
           </div>
           <div className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-xl flex items-center gap-1.5">
             <span className="text-slate-400 text-[10px]">F1:</span>

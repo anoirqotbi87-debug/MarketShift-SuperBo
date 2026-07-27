@@ -57,7 +57,7 @@ export const MLEngineTab: React.FC<MLEngineTabProps> = ({ mlStats }) => {
           <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800/80 font-mono">
             <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/80">
               <div className="text-[10px] text-slate-400 font-sans">Précision</div>
-              <div className="text-sm font-bold text-emerald-400 mt-0.5">{mlStats.accuracy}%</div>
+              <div className="text-sm font-bold text-emerald-400 mt-0.5">{(mlStats.accuracy * 100).toFixed(1)}%</div>
             </div>
             <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/80">
               <div className="text-[10px] text-slate-400 font-sans">F1-Score</div>
