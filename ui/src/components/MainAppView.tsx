@@ -276,7 +276,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
           <DailyProfitProgressBar accountState={accountState} />
 
           {/* Active Tab Screen Content - Expanded Height to accommodate Bottom Bar */}
-          <div className="p-3 pb-24 min-h-[550px] relative overflow-y-auto no-scrollbar">
+          <div className="flex-1 p-3 pb-24 min-h-[550px] relative overflow-y-auto no-scrollbar">
             {activeTab === 'dashboard' && (
               <div className="space-y-3">
                 <ClosedTradesChart closedTrades={closedTrades} />
