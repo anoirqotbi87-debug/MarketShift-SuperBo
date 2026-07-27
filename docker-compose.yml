@@ -2,26 +2,39 @@ version: '3.8'
 
 services:
   marketshift-backend:
-    build: .
-    container_name: marketshift-bot
-    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: marketshift_backend
+    restart: always
     ports:
       - "8000:8000"
     environment:
-      - API_KEY=${API_KEY}
-      - LOG_LEVEL=INFO
-      - PYTHONUNBUFFERED=1
+      - DISPLAY=:99
+      - WINEPREFIX=/root/.wine
+      - WINEDEBUG=-all
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
-    # Optionnel: si vous avez un broker mock ou une DB, vous pouvez configurer le réseau ici.
+      - ./data:/app/data
+      - ./models:/app/models
+    networks:
+      - marketshift_net
 
   marketshift-frontend:
-    build: ./ui
-    container_name: marketshift-ui
-    restart: unless-stopped
+    build:
+      context: ./ui
+      dockerfile: Dockerfile.frontend
+    container_name: marketshift_frontend
+    restart: always
     ports:
       - "80:80"
     depends_on:
       - marketshift-backend
+    networks:
+      - marketshift_net
+
+networks:
+  marketshift_net:
+    driver: bridge
