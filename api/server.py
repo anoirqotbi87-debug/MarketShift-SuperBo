@@ -353,6 +353,8 @@ def get_account_information():
     
     try:
         import MetaTrader5 as mt5
+        # Must initialize MT5 in this FastAPI worker thread context
+        mt5.initialize()
         today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         deals = mt5.history_deals_get(today_start, datetime.datetime.now())
         if deals:
