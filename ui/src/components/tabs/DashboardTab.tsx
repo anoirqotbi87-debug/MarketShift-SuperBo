@@ -314,7 +314,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
           <div className="flex flex-col items-center">
             <span className="text-[10px] text-slate-500 font-sans">Niveau</span>
-            <span className="text-xs font-bold text-indigo-400 font-mono">{accountState.marginLevelPct}%</span>
+            <span className="text-xs font-bold text-indigo-400 font-mono">{accountState.marginLevelPct.toFixed(2)}%</span>
           </div>
         </div>
       </div>
