@@ -1,5 +1,6 @@
-import uvicorn
 import logging
+import uvicorn
+
 from fastapi import FastAPI
 from infrastructure.config import Config
 from infrastructure.mt5_connector import MT5Connector
