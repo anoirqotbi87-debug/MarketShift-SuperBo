@@ -270,7 +270,7 @@ export default function App() {
   if (!user) return <LoginScreen />;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
+    <div className="h-screen overflow-hidden flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
       
       {/* Global Alerts */}
       <Toaster theme="dark" position="top-right" richColors />
@@ -293,7 +293,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="pb-12">
+      <main className="flex-1 overflow-hidden relative">
         {viewMode === 'simulator' ? (
           <ErrorBoundary>
             <MainAppView
