@@ -16,17 +16,20 @@ class BrokerRouter(IBrokerConnector):
 
     def connect(self) -> bool:
         primary_ok = self.primary.connect()
-        fallback_ok = self.fallback.connect()
         
         if primary_ok:
             self._active_broker = self.primary
             self.connected = True
             logging.info("[Router] Connecté au courtier PRIMAIRE avec succès.")
             return True
-        elif fallback_ok:
+            
+        logging.warning("[Router] ⚠️ Primaire injoignable, tentative de connexion au FALLBACK.")
+        fallback_ok = self.fallback.connect()
+        
+        if fallback_ok:
             self._active_broker = self.fallback
             self.connected = True
-            logging.warning("[Router] ⚠️ Primaire injoignable, bascule immédiate sur FALLBACK.")
+            logging.info("[Router] ✅ Connecté au courtier FALLBACK avec succès.")
             return True
             
         logging.error("[Router] ❌ Échec critique : Primaire et Fallback injoignables.")
