@@ -191,7 +191,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
         </div>
 
         <div className="max-w-md mx-auto pointer-events-auto md:max-w-none md:w-full md:flex-1 md:flex md:flex-col md:gap-4 md:px-3 md:justify-center">
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl flex items-center justify-between px-2 py-2 shadow-2xl shadow-indigo-900/20 md:bg-transparent md:border-none md:shadow-none md:flex-col md:gap-6 md:px-0">
+          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl flex items-center justify-start overflow-x-auto no-scrollbar px-2 py-2 shadow-2xl shadow-indigo-900/20 md:bg-transparent md:border-none md:shadow-none md:flex-col md:gap-6 md:px-0">
             {bottomNav.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -199,7 +199,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as ActiveTabSimulator)}
-                  className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all min-w-[64px] md:w-full md:p-3 md:hover:bg-slate-900/50 ${
+                  className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all flex-shrink-0 min-w-[64px] md:w-full md:p-3 md:hover:bg-slate-900/50 ${
                     isActive
                       ? 'text-indigo-400 md:bg-slate-900/80 md:border md:border-slate-800'
                       : 'text-slate-500 hover:text-slate-300'

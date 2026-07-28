@@ -157,7 +157,64 @@ export const OptimizerTab: React.FC = () => {
                   </div>
                 </div>
                 
-                <h4 className="text-md font-semibold text-white mb-3">Résultats de la Grid</h4>
+                <h4 className="text-md font-semibold text-white mb-3 mt-8">Matrice de Sensibilité Heatmap (SL vs TP)</h4>
+                <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5 mb-8">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex text-xs text-slate-500 mb-2">
+                      <div className="w-16"></div>
+                      <div className="flex-1 flex justify-between px-2">
+                        <span>Take Profit (pips) →</span>
+                      </div>
+                    </div>
+                    
+                    {Array.from(new Set(result.gridResults.map((r: any) => r.sl))).sort((a: any, b: any) => Number(a) - Number(b)).map((sl: any) => (
+                      <div key={`row-${sl}`} className="flex items-center gap-2">
+                        <div className="w-16 text-xs text-slate-400 text-right pr-2">SL {sl}</div>
+                        <div className="flex-1 grid grid-cols-3 gap-2">
+                          {Array.from(new Set(result.gridResults.map((r: any) => r.tp))).sort((a: any, b: any) => Number(a) - Number(b)).map((tp: any) => {
+                            const cell = result.gridResults.find((r: any) => r.sl === sl && r.tp === tp);
+                            if (!cell) return <div key={`cell-${sl}-${tp}`} className="bg-slate-800 rounded p-2 h-16"></div>;
+                            
+                            // Define color intensity based on Sharpe
+                            const isBest = cell.sharpeRatio === result.bestReport.sharpeRatio;
+                            const isPositive = cell.sharpeRatio > 0;
+                            const isZero = cell.sharpeRatio === 0;
+                            
+                            let bgClass = "bg-slate-800/80"; // Default
+                            if (isBest) bgClass = "bg-emerald-500 hover:bg-emerald-400 border-2 border-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.5)] cursor-pointer scale-105 z-10 transition-all";
+                            else if (isPositive) bgClass = "bg-emerald-500/40 hover:bg-emerald-500/60 cursor-pointer transition-all";
+                            else if (isZero) bgClass = "bg-slate-700/80 hover:bg-slate-600 cursor-pointer transition-all";
+                            else bgClass = "bg-rose-500/20 hover:bg-rose-500/40 cursor-pointer transition-all";
+                            
+                            return (
+                              <div key={`cell-${sl}-${tp}`} className={`${bgClass} rounded-lg p-2 flex flex-col items-center justify-center relative group min-h-[4rem]`}>
+                                {isBest && <span className="absolute -top-2 -right-2 text-lg">⭐</span>}
+                                <span className={`font-bold ${isBest ? 'text-slate-900' : 'text-white'}`}>{cell.sharpeRatio.toFixed(2)}</span>
+                                <span className={`text-[10px] ${isBest ? 'text-slate-800' : 'text-slate-400'}`}>TP {tp}</span>
+                                
+                                {/* Tooltip */}
+                                <div className="absolute opacity-0 group-hover:opacity-100 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-900 text-white text-xs p-2 rounded shadow-xl border border-slate-700 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                                  <p className="font-bold mb-1">SL: {sl} | TP: {tp}</p>
+                                  <p>Sharpe: {cell.sharpeRatio.toFixed(2)}</p>
+                                  <p>WinRate: {cell.winRate.toFixed(1)}%</p>
+                                  <p>Net Profit: ${cell.netProfit}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex text-xs text-slate-500 mt-2">
+                      <div className="w-16"></div>
+                      <div className="flex-1 text-center">
+                        💡 Survolez les cases pour voir les détails (Couleur = Sharpe Ratio)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <h4 className="text-md font-semibold text-white mb-3">Tableau Détaillé</h4>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm text-slate-300">
                     <thead className="bg-slate-900/80 text-slate-400">
