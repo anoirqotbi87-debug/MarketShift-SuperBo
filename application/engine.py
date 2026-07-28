@@ -183,7 +183,7 @@ class Engine:
         """Traite un symbole de manière asynchrone : données → signal → ML → sizing → exécution."""
         # 1. Récupérer les données OHLCV M1 (Offload au ThreadPool pour ne pas bloquer l'Event Loop)
         # On utilise self._tf_m1 (stocké dans __init__) pour éviter tout problème de scope Python 3.14
-        df = self.connector.get_historical_data(symbol, self._tf_m1, 200)
+        df = await asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m1, 200)
         if df is None or df.empty:
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
@@ -427,7 +427,8 @@ class Engine:
                 payload = await self.order_queue.get()
                 
                 # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent)
-                result = self.connector.execute_order(
+                result = await asyncio.to_thread(
+                    self.connector.execute_order,
                     payload['symbol'],
                     payload['direction'],
                     payload['volume'],
