@@ -1,31 +1,38 @@
-# Étape 1 : Build
-FROM node:18-alpine AS builder
+# Étape 1 : Build de l'application React/Vite
+FROM node:20-alpine as builder
 
 WORKDIR /app
-COPY package*.json ./
+
+# Copier les fichiers de dépendances
+COPY package.json package-lock.json* ./
+
+# Installer les dépendances
 RUN npm install
 
+# Copier le reste du code source
 COPY . .
-# S'assurer que le backend cible l'environnement de production sur le même serveur
-# Vous pouvez surcharger VITE_API_URL au moment du build si nécessaire
+
+# Construire l'application pour la production
 RUN npm run build
 
-# Étape 2 : Serveur Web
+# Étape 2 : Serveur Nginx léger pour héberger les fichiers statiques
 FROM nginx:alpine
 
-# Copier les fichiers buildés depuis l'étape 1
+# Copier les fichiers buildés depuis l'étape 1 vers Nginx
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Ajouter une configuration Nginx personnalisée pour les PWA (React Router / Vite)
-RUN echo 'server {\n\
-    listen 80;\n\
-    location / {\n\
-        root /usr/share/nginx/html;\n\
-        index index.html index.htm;\n\
-        try_files $uri $uri/ /index.html;\n\
-    }\n\
+# Ajouter une configuration basique pour React Router (SPA)
+RUN echo 'server { \
+    listen 80; \
+    location / { \
+        root /usr/share/nginx/html; \
+        index index.html index.htm; \
+        try_files $uri $uri/ /index.html; \
+    } \
 }' > /etc/nginx/conf.d/default.conf
 
+# Exposer le port 80
 EXPOSE 80
 
+# Démarrer Nginx
 CMD ["nginx", "-g", "daemon off;"]
