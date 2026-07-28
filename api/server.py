@@ -404,6 +404,48 @@ def get_positions():
     ]
 
 
+@app.get("/export-history")
+def export_history(symbol: str = "EURUSD", timeframe: str = "M15", num_bars: int = 50000):
+    """Exporte l'historique MT5 sous forme de fichier CSV."""
+    import pandas as pd
+    import MetaTrader5 as mt5
+    from fastapi.responses import Response
+    import io
+    
+    if not _engine or not _engine.connector:
+        raise HTTPException(status_code=500, detail="Moteur non initialisé")
+        
+    try:
+        # Convert timeframe string to MT5 timeframe constant
+        tf_map = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H4": mt5.TIMEFRAME_H4,
+            "D1": mt5.TIMEFRAME_D1
+        }
+        tf = tf_map.get(timeframe, mt5.TIMEFRAME_M15)
+        
+        rates = mt5.copy_rates_from_pos(symbol, tf, 0, num_bars)
+        if rates is None or len(rates) == 0:
+            raise HTTPException(status_code=404, detail=f"Aucune donnée historique trouvée pour {symbol}")
+            
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        
+        stream = io.StringIO()
+        df.to_csv(stream, index=False)
+        
+        response = Response(content=stream.getvalue(), media_type="text/csv")
+        response.headers["Content-Disposition"] = f"attachment; filename={symbol}_{timeframe}_historical_data.csv"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+        return response
+    except Exception as e:
+        logging.error(f"[API] Erreur export-history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/history")
 def get_history():
     """Retourne l'historique réel des deals MT5 sur les 30 derniers jours."""

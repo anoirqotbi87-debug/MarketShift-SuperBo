@@ -8,6 +8,12 @@ export const OptimizerTab: React.FC = () => {
   const [result, setResult] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const downloadHistory = () => {
+    // Determine a reasonable timeframe (we use M15 by default for grid search)
+    const url = `http://${window.location.hostname}:8000/export-history?symbol=${symbol}&timeframe=M15&num_bars=50000`;
+    window.open(url, '_blank');
+  };
+
   const runOptimizer = async () => {
     if (!fileInputRef.current?.files?.[0]) {
       alert("Veuillez d'abord uploader un fichier CSV contenant l'historique MT5.");
@@ -72,6 +78,10 @@ export const OptimizerTab: React.FC = () => {
                   <option value="GBPUSD">GBP/USD</option>
                   <option value="USDJPY">USD/JPY</option>
                   <option value="XAUUSD">XAU/USD (Or)</option>
+                  <option value="BTCUSD">BTC/USD (Bitcoin)</option>
+                  <option value="ETHUSD">ETH/USD (Ethereum)</option>
+                  <option value="US30Cash">US30 (Dow Jones)</option>
+                  <option value="US100Cash">US100 (Nasdaq)</option>
                 </select>
               </div>
 
@@ -91,8 +101,15 @@ export const OptimizerTab: React.FC = () => {
                   type="file" 
                   accept=".csv"
                   ref={fileInputRef}
-                  className="w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-500/20 file:text-blue-400 hover:file:bg-blue-500/30 transition-all"
+                  className="w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-500/20 file:text-blue-400 hover:file:bg-blue-500/30 transition-all mb-2"
                 />
+                <button
+                  onClick={downloadHistory}
+                  className="w-full text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 py-2 rounded-xl transition-all border border-white/5 flex items-center justify-center gap-2"
+                >
+                  <TrendingUp className="w-4 h-4 text-blue-400" />
+                  Extraire l'Historique MT5 en direct ({symbol})
+                </button>
               </div>
 
               <button
