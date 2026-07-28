@@ -131,7 +131,7 @@ export const BacktesterTab: React.FC = () => {
       formData.append('symbol', symbol);
       formData.append('initial_capital', initialCapital.toString());
 
-      const res = await fetch('http://localhost:8000/backtest', {
+      const res = await fetch(`http://${window.location.hostname}:8000/backtest`, {
         method: 'POST',
         body: formData,
       });

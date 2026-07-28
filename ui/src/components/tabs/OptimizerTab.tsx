@@ -29,7 +29,7 @@ export const OptimizerTab: React.FC = () => {
       formData.append('symbol', symbol);
       formData.append('initial_capital', initialCapital.toString());
 
-      const res = await fetch('http://localhost:8000/optimize', {
+      const res = await fetch(`http://${window.location.hostname}:8000/optimize`, {
         method: 'POST',
         body: formData,
       });

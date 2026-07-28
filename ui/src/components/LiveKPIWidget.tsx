@@ -15,7 +15,7 @@ export const LiveKPIWidget: React.FC = () => {
 
   const fetchKPIs = async () => {
     try {
-      const res = await fetch('http://localhost:8000/kpi');
+      const res = await fetch(`http://${window.location.hostname}:8000/kpi`);
       if (res.ok) {
         const data = await res.json();
         setMetrics(data);
