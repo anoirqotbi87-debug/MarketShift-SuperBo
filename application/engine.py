@@ -225,17 +225,23 @@ class Engine:
             current_spread_pips = sym_info.spread * (sym_info.point / pip_size)
 
         # Offload SQLAlchemy queries to a background thread to prevent blocking the async loop
-        is_valid = self.pretrade_validator.validate_signal(validated_signal, self.state_manager.account, current_spread_pips)
+        is_valid = await asyncio.to_thread(
+            self.pretrade_validator.validate_signal, 
+            validated_signal, 
+            self.state_manager.account, 
+            current_spread_pips
+        )
         if not is_valid:
             # Le Validator gère lui-même ses propres logs d'erreurs détaillés
             return
 
-        # 6. Calcul du volume via Kelly Criterion
-        volume = self.position_sizer.compute_volume(
-            signal=validated_signal,
-            account=self.state_manager.account,
-            pip_value=self._get_pip_value(symbol),
-            sl_pips=validated_signal.sl_pips
+        # 6. Calcul du volume via Kelly Criterion (SQLAlchemy offloaded to thread)
+        volume = await asyncio.to_thread(
+            self.position_sizer.compute_volume,
+            validated_signal,
+            self.state_manager.account,
+            pip_size,
+            validated_signal.sl_pips
         )
 
         # 7. Convertir SL/TP pips → prix absolus pour MT5
