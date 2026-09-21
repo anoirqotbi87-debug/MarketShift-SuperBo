@@ -1,0 +1,304 @@
+{
+    "symbol": "EURUSD",
+    "bestParams": {
+        "confThreshold": 55,
+        "slMult": 3.0
+    },
+    "bestReport": {
+        "netProfit": 319.82,
+        "winRate": 61.51,
+        "maxDrawdownPct": 0.85,
+        "sharpeRatio": 1.73,
+        "totalTrades": 938
+    },
+    "gridResults": [
+        {
+            "confThreshold": 55,
+            "slMult": 1.0,
+            "netProfit": 196.31,
+            "winRate": 61.62,
+            "maxDrawdownPct": 0.44,
+            "sharpeRatio": 1.36
+        },
+        {
+            "confThreshold": 55,
+            "slMult": 1.25,
+            "netProfit": 217.54,
+            "winRate": 60.66,
+            "maxDrawdownPct": 0.53,
+            "sharpeRatio": 1.43
+        },
+        {
+            "confThreshold": 55,
+            "slMult": 1.5,
+            "netProfit": 245.09,
+            "winRate": 61.51,
+            "maxDrawdownPct": 0.58,
+            "sharpeRatio": 1.55
+        },
+        {
+            "confThreshold": 55,
+            "slMult": 2.0,
+            "netProfit": 265.63,
+            "winRate": 60.55,
+            "maxDrawdownPct": 0.7,
+            "sharpeRatio": 1.56
+        },
+        {
+            "confThreshold": 55,
+            "slMult": 2.5,
+            "netProfit": 287.07,
+            "winRate": 60.66,
+            "maxDrawdownPct": 0.79,
+            "sharpeRatio": 1.6
+        },
+        {
+            "confThreshold": 55,
+            "slMult": 3.0,
+            "netProfit": 319.82,
+            "winRate": 61.51,
+            "maxDrawdownPct": 0.85,
+            "sharpeRatio": 1.73
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 1.0,
+            "netProfit": 117.36,
+            "winRate": 60.95,
+            "maxDrawdownPct": 0.29,
+            "sharpeRatio": 0.91
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 1.25,
+            "netProfit": 126.6,
+            "winRate": 59.93,
+            "maxDrawdownPct": 0.33,
+            "sharpeRatio": 0.95
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 1.5,
+            "netProfit": 131.39,
+            "winRate": 59.42,
+            "maxDrawdownPct": 0.37,
+            "sharpeRatio": 0.96
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 2.0,
+            "netProfit": 154.28,
+            "winRate": 59.76,
+            "maxDrawdownPct": 0.43,
+            "sharpeRatio": 1.08
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 2.5,
+            "netProfit": 165.14,
+            "winRate": 60.1,
+            "maxDrawdownPct": 0.47,
+            "sharpeRatio": 1.13
+        },
+        {
+            "confThreshold": 60,
+            "slMult": 3.0,
+            "netProfit": 189.38,
+            "winRate": 60.95,
+            "maxDrawdownPct": 0.49,
+            "sharpeRatio": 1.27
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 1.0,
+            "netProfit": 76.62,
+            "winRate": 64.51,
+            "maxDrawdownPct": 0.15,
+            "sharpeRatio": 0.67
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 1.25,
+            "netProfit": 63.67,
+            "winRate": 59.26,
+            "maxDrawdownPct": 0.19,
+            "sharpeRatio": 0.53
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 1.5,
+            "netProfit": 65.24,
+            "winRate": 58.64,
+            "maxDrawdownPct": 0.2,
+            "sharpeRatio": 0.54
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 2.0,
+            "netProfit": 79.11,
+            "winRate": 60.19,
+            "maxDrawdownPct": 0.21,
+            "sharpeRatio": 0.66
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 2.5,
+            "netProfit": 83.9,
+            "winRate": 60.49,
+            "maxDrawdownPct": 0.22,
+            "sharpeRatio": 0.69
+        },
+        {
+            "confThreshold": 65,
+            "slMult": 3.0,
+            "netProfit": 100.68,
+            "winRate": 61.42,
+            "maxDrawdownPct": 0.22,
+            "sharpeRatio": 0.83
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 1.0,
+            "netProfit": 46.97,
+            "winRate": 68.52,
+            "maxDrawdownPct": 0.07,
+            "sharpeRatio": 0.44
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 1.25,
+            "netProfit": 38.81,
+            "winRate": 63.58,
+            "maxDrawdownPct": 0.09,
+            "sharpeRatio": 0.36
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 1.5,
+            "netProfit": 38.98,
+            "winRate": 62.96,
+            "maxDrawdownPct": 0.1,
+            "sharpeRatio": 0.36
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 2.0,
+            "netProfit": 47.28,
+            "winRate": 64.2,
+            "maxDrawdownPct": 0.09,
+            "sharpeRatio": 0.44
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 2.5,
+            "netProfit": 53.57,
+            "winRate": 65.43,
+            "maxDrawdownPct": 0.08,
+            "sharpeRatio": 0.49
+        },
+        {
+            "confThreshold": 70,
+            "slMult": 3.0,
+            "netProfit": 61.66,
+            "winRate": 66.05,
+            "maxDrawdownPct": 0.08,
+            "sharpeRatio": 0.57
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 1.0,
+            "netProfit": 19.78,
+            "winRate": 66.67,
+            "maxDrawdownPct": 0.02,
+            "sharpeRatio": 0.19
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 1.25,
+            "netProfit": 14.25,
+            "winRate": 61.11,
+            "maxDrawdownPct": 0.03,
+            "sharpeRatio": 0.14
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 1.5,
+            "netProfit": 14.41,
+            "winRate": 61.11,
+            "maxDrawdownPct": 0.04,
+            "sharpeRatio": 0.14
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 2.0,
+            "netProfit": 17.74,
+            "winRate": 57.41,
+            "maxDrawdownPct": 0.03,
+            "sharpeRatio": 0.17
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 2.5,
+            "netProfit": 21.49,
+            "winRate": 59.26,
+            "maxDrawdownPct": 0.03,
+            "sharpeRatio": 0.21
+        },
+        {
+            "confThreshold": 75,
+            "slMult": 3.0,
+            "netProfit": 22.5,
+            "winRate": 59.26,
+            "maxDrawdownPct": 0.03,
+            "sharpeRatio": 0.22
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 1.0,
+            "netProfit": 3.8,
+            "winRate": 60.0,
+            "maxDrawdownPct": 0.0,
+            "sharpeRatio": 0.04
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 1.25,
+            "netProfit": 1.27,
+            "winRate": 50.0,
+            "maxDrawdownPct": 0.01,
+            "sharpeRatio": 0.01
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 1.5,
+            "netProfit": 1.42,
+            "winRate": 50.0,
+            "maxDrawdownPct": 0.01,
+            "sharpeRatio": 0.01
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 2.0,
+            "netProfit": 2.59,
+            "winRate": 50.0,
+            "maxDrawdownPct": 0.0,
+            "sharpeRatio": 0.03
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 2.5,
+            "netProfit": 3.02,
+            "winRate": 50.0,
+            "maxDrawdownPct": 0.0,
+            "sharpeRatio": 0.03
+        },
+        {
+            "confThreshold": 80,
+            "slMult": 3.0,
+            "netProfit": 3.44,
+            "winRate": 50.0,
+            "maxDrawdownPct": 0.0,
+            "sharpeRatio": 0.03
+        }
+    ]
+}

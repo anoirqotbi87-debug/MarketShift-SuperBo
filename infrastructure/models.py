@@ -6,7 +6,9 @@ class TradeRecord(Base):
     __tablename__ = "trade_records"
 
     id = Column(Integer, primary_key=True, index=True)
+    account_login = Column(Integer, index=True, nullable=True) # NOUVEAU: Filtrage par compte
     ticket = Column(Integer, index=True, nullable=True)
+    magic = Column(Integer, index=True, nullable=True)  # NOUVEAU: Magic number (0 = Manuel)
     symbol = Column(String, index=True)
     type = Column(String) # "BUY" or "SELL"
     volume = Column(Float)

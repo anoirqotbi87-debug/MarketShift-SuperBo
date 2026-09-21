@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { MT5AccountState } from '../types';
 import { 
   ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ReferenceLine 
@@ -6,6 +6,7 @@ import {
 import { 
   TrendingUp, TrendingDown, Award, Zap, ArrowUpRight, BarChart3, Layers, Target, Activity, ShieldCheck, Scale, Sparkles, Info
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 
 interface EquityBenchmarkChartProps {
   accountState: MT5AccountState;
@@ -23,92 +24,67 @@ export interface EquityBenchmarkPoint {
 type TimeframeType = '1W' | '1M' | '3M' | 'YTD' | 'ALL';
 type BenchmarkBasketType = 'BASKET_TOP5' | 'BTCUSD' | 'XAUUSD' | 'EURUSD';
 
-// Historical performance curves for different timeframes starting at $10,000 capital
-const HISTORICAL_BENCHMARK_DATA: Record<TimeframeType, {
-  time: string;
-  stratEqu: number;
-  benchEqu: number;
-  benchBtcEqu: number;
-  benchXauEqu: number;
-  benchEurEqu: number;
-}[]> = {
-  '1W': [
-    { time: 'Lun 09:00', stratEqu: 10000, benchEqu: 10000, benchBtcEqu: 10000, benchXauEqu: 10000, benchEurEqu: 10000 },
-    { time: 'Mar 12:00', stratEqu: 10120, benchEqu: 10030, benchBtcEqu: 10080, benchXauEqu: 10040, benchEurEqu: 9980 },
-    { time: 'Mer 15:00', stratEqu: 10210, benchEqu: 9980, benchBtcEqu: 9890, benchXauEqu: 10090, benchEurEqu: 9970 },
-    { time: 'Jeu 11:00', stratEqu: 10320, benchEqu: 10060, benchBtcEqu: 10140, benchXauEqu: 10110, benchEurEqu: 9990 },
-    { time: 'Ven 17:00', stratEqu: 10450, benchEqu: 10095, benchBtcEqu: 10210, benchXauEqu: 10180, benchEurEqu: 10020 },
-  ],
-  '1M': [
-    { time: 'Sem 1 - J1', stratEqu: 10000, benchEqu: 10000, benchBtcEqu: 10000, benchXauEqu: 10000, benchEurEqu: 10000 },
-    { time: 'Sem 1 - J5', stratEqu: 10150, benchEqu: 9850, benchBtcEqu: 9650, benchXauEqu: 10050, benchEurEqu: 9920 },
-    { time: 'Sem 2 - J5', stratEqu: 10280, benchEqu: 9920, benchBtcEqu: 9820, benchXauEqu: 10120, benchEurEqu: 9880 },
-    { time: 'Sem 3 - J5', stratEqu: 10390, benchEqu: 10040, benchBtcEqu: 10150, benchXauEqu: 10210, benchEurEqu: 9940 },
-    { time: 'Sem 4 - J5', stratEqu: 10450, benchEqu: 10080, benchBtcEqu: 10110, benchXauEqu: 10250, benchEurEqu: 9960 },
-  ],
-  '3M': [
-    { time: 'Mois 1 - Deb', stratEqu: 10000, benchEqu: 10000, benchBtcEqu: 10000, benchXauEqu: 10000, benchEurEqu: 10000 },
-    { time: 'Mois 1 - Fin', stratEqu: 10350, benchEqu: 9780, benchBtcEqu: 9400, benchXauEqu: 10150, benchEurEqu: 9850 },
-    { time: 'Mois 2 - Fin', stratEqu: 10820, benchEqu: 10120, benchBtcEqu: 10300, benchXauEqu: 10380, benchEurEqu: 9790 },
-    { time: 'Mois 3 - Fin', stratEqu: 11250, benchEqu: 10190, benchBtcEqu: 10420, benchXauEqu: 10520, benchEurEqu: 9880 },
-  ],
-  'YTD': [
-    { time: 'Jan 01', stratEqu: 10000, benchEqu: 10000, benchBtcEqu: 10000, benchXauEqu: 10000, benchEurEqu: 10000 },
-    { time: 'Fév 01', stratEqu: 10420, benchEqu: 10150, benchBtcEqu: 10380, benchXauEqu: 10210, benchEurEqu: 9910 },
-    { time: 'Mar 01', stratEqu: 10890, benchEqu: 9910, benchBtcEqu: 9720, benchXauEqu: 10350, benchEurEqu: 9820 },
-    { time: 'Avr 01', stratEqu: 11350, benchEqu: 10280, benchBtcEqu: 10650, benchXauEqu: 10610, benchEurEqu: 9890 },
-    { time: 'Mai 01', stratEqu: 11820, benchEqu: 10390, benchBtcEqu: 10820, benchXauEqu: 10750, benchEurEqu: 9940 },
-  ],
-  'ALL': [
-    { time: 'T1 2025', stratEqu: 10000, benchEqu: 10000, benchBtcEqu: 10000, benchXauEqu: 10000, benchEurEqu: 10000 },
-    { time: 'T2 2025', stratEqu: 10950, benchEqu: 10220, benchBtcEqu: 10500, benchXauEqu: 10380, benchEurEqu: 9850 },
-    { time: 'T3 2025', stratEqu: 11840, benchEqu: 9890, benchBtcEqu: 9620, benchXauEqu: 10590, benchEurEqu: 9710 },
-    { time: 'T4 2025', stratEqu: 12650, benchEqu: 10410, benchBtcEqu: 10920, benchXauEqu: 10850, benchEurEqu: 9820 },
-    { time: 'T1 2026', stratEqu: 13420, benchEqu: 10580, benchBtcEqu: 11200, benchXauEqu: 11150, benchEurEqu: 9890 },
-  ]
-};
-
 export const EquityBenchmarkChart: React.FC<EquityBenchmarkChartProps> = ({ accountState }) => {
   const [timeframe, setTimeframe] = useState<TimeframeType>('1M');
   const [benchmarkType, setBenchmarkType] = useState<BenchmarkBasketType>('BASKET_TOP5');
   const [displayMode, setDisplayMode] = useState<'usd' | 'pct'>('usd');
+  const [chartData, setChartData] = useState<EquityBenchmarkPoint[]>([]);
 
   const initialCapital = 10000;
 
-  // Process data based on timeframe & selected benchmark asset
-  const chartData = useMemo(() => {
-    const rawData = HISTORICAL_BENCHMARK_DATA[timeframe];
-
-    return rawData.map((pt, idx) => {
-      // Pick benchmark equity based on selected type
-      let benchEquVal = pt.benchEqu;
-      if (benchmarkType === 'BTCUSD') benchEquVal = pt.benchBtcEqu;
-      if (benchmarkType === 'XAUUSD') benchEquVal = pt.benchXauEqu;
-      if (benchmarkType === 'EURUSD') benchEquVal = pt.benchEurEqu;
-
-      // Overwrite final strategy point with live accountState equity
-      let stratEquVal = pt.stratEqu;
-      if (idx === rawData.length - 1) {
-        stratEquVal = accountState.equity;
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const urlBench = `${getApiBaseUrl()}/benchmark-curve?timeframe=${timeframe}&asset=${benchmarkType}`;
+        const urlStrat = `${getApiBaseUrl()}/equity-curve?timeframe=${timeframe}`;
+        
+        const [resBench, resStrat] = await Promise.all([fetch(urlBench), fetch(urlStrat)]);
+        
+        if (resBench.ok && resStrat.ok) {
+          const benchData = await resBench.json();
+          let stratData = await resStrat.json();
+          
+          // Match length
+          const minLen = Math.min(benchData.length, stratData.length);
+          if (minLen > 0) {
+            stratData = stratData.slice(-minLen);
+            const merged = stratData.map((pt: any, idx: number) => {
+              const benchEquVal = benchData[benchData.length - minLen + idx]?.benchmarkEquity || 10000;
+              let stratEquVal = pt.equity;
+              
+              if (idx === minLen - 1) {
+                stratEquVal = accountState.equity; // Live update
+              }
+              
+              const stratReturnPct = ((stratEquVal - initialCapital) / initialCapital) * 100;
+              const benchReturnPct = ((benchEquVal - initialCapital) / initialCapital) * 100;
+              const alphaPct = stratReturnPct - benchReturnPct;
+              
+              return {
+                time: pt.time,
+                strategyEquity: Math.round(stratEquVal * 100) / 100,
+                strategyReturnPct: Math.round(stratReturnPct * 100) / 100,
+                benchmarkEquity: Math.round(benchEquVal * 100) / 100,
+                benchmarkReturnPct: Math.round(benchReturnPct * 100) / 100,
+                alphaPct: Math.round(alphaPct * 100) / 100,
+              };
+            });
+            setChartData(merged);
+          }
+        }
+      } catch (err) {
+        console.error("Erreur fetch benchmark data:", err);
       }
-
-      const stratReturnPct = ((stratEquVal - initialCapital) / initialCapital) * 100;
-      const benchReturnPct = ((benchEquVal - initialCapital) / initialCapital) * 100;
-      const alphaPct = stratReturnPct - benchReturnPct;
-
-      return {
-        time: pt.time,
-        strategyEquity: Math.round(stratEquVal * 100) / 100,
-        strategyReturnPct: Math.round(stratReturnPct * 100) / 100,
-        benchmarkEquity: Math.round(benchEquVal * 100) / 100,
-        benchmarkReturnPct: Math.round(benchReturnPct * 100) / 100,
-        alphaPct: Math.round(alphaPct * 100) / 100,
-      };
-    });
-  }, [timeframe, benchmarkType, accountState]);
+    };
+    fetchData();
+    const interval = setInterval(fetchData, 300000);
+    return () => clearInterval(interval);
+  }, [timeframe, benchmarkType, accountState.equity]);
 
   // Aggregate metrics
-  const latestPoint = chartData[chartData.length - 1];
+  const latestPoint = chartData.length > 0 
+    ? chartData[chartData.length - 1] 
+    : { strategyReturnPct: 0, benchmarkReturnPct: 0, alphaPct: 0, strategyEquity: 0, benchmarkEquity: 0 };
   const stratReturnTotalPct = latestPoint.strategyReturnPct;
   const benchReturnTotalPct = latestPoint.benchmarkReturnPct;
   const alphaTotalPct = latestPoint.alphaPct;

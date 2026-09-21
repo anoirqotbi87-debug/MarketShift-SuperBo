@@ -10,7 +10,7 @@ class SMCStrategy(StrategyBase):
     Stratégie basée sur les concepts Smart Money (SMC) & Inner Circle Trader (ICT).
     Recherche la confluence de Market Structure Shifts (MSS) et de Fair Value Gaps (FVG).
     """
-    def __init__(self, name="SMC_ICT", weight=2.0, sl_multiplier=1.0, tp_multiplier=3.0):
+    def __init__(self, name="SMC_ICT", weight=2.0, sl_multiplier=2.0, tp_multiplier=3.0):
         super().__init__(name, weight, sl_multiplier=sl_multiplier, tp_multiplier=tp_multiplier)
         self._df = pd.DataFrame()
 
@@ -62,41 +62,63 @@ class SMCStrategy(StrategyBase):
             bullish_mss = current_close > swing_high
             bearish_mss = current_close < swing_low
             
-            # --- 3. Filtre de Tendance Macro (HTF Proxy via EMA 200) ---
+            # --- 3. Filtre de Tendance Macro (HTF Proxy via SMA 200) ---
             # On vérifie la tendance globale sur les 200 bougies M1
             macro_trend_bullish = True
             macro_trend_bearish = True
             if len(self._df) >= 200:
-                ema_200 = self._df['close'].ewm(span=200, adjust=False).mean().iloc[-1]
-                macro_trend_bullish = current_close > ema_200
-                macro_trend_bearish = current_close < ema_200
+                sma_200 = self._df['close'].rolling(window=200).mean().iloc[-1]
+                macro_trend_bullish = current_close > sma_200
+                macro_trend_bearish = current_close < sma_200
                 
             bullish_mss = bullish_mss and macro_trend_bullish
             bearish_mss = bearish_mss and macro_trend_bearish
 
+            # --- 4. Détection Order Block (OB) Vectorisée ---
+            # OB = Dernière bougie opposée suivie d'une forte impulsion (2 bougies)
+            ob_window = recent.iloc[-10:-1]
+            
+            is_bearish = ob_window['close'] < ob_window['open']
+            is_bullish = ob_window['close'] > ob_window['open']
+            
+            body_size = (ob_window['close'] - ob_window['open']).abs()
+            candle_range = (ob_window['high'] - ob_window['low']).replace(0, 1e-9)
+            is_significant = body_size > (candle_range * 0.3)
+            
+            next1_bullish = is_bullish.shift(-1).fillna(False)
+            next2_bullish = is_bullish.shift(-2).fillna(False)
+            next1_bearish = is_bearish.shift(-1).fillna(False)
+            next2_bearish = is_bearish.shift(-2).fillna(False)
+            
+            valid_bullish_obs = is_bearish & is_significant & next1_bullish & next2_bullish
+            valid_bearish_obs = is_bullish & is_significant & next1_bearish & next2_bearish
+            
+            bullish_ob = valid_bullish_obs.any()
+            bearish_ob = valid_bearish_obs.any()
+
             pip_size = self.get_pip_size(symbol)
             sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
 
-            # Confluence Achat : Bullish MSS + Bullish FVG
-            if bullish_mss and bullish_fvg:
-                logging.info(f"[{self.name}] 🟢 BULLISH SMC SETUP (MSS + FVG) sur {symbol} | ATR={atr:.5f}")
+            # Confluence Achat : Bullish MSS + Bullish FVG + Bullish OB
+            if bullish_mss and bullish_fvg and bullish_ob:
+                logging.debug(f"[{self.name}] 🟢 BULLISH SMC SETUP (MSS + FVG + OB) sur {symbol} | ATR={atr:.5f}")
                 return Signal(
                     symbol=symbol,
                     direction=OrderType.BUY,
-                    confidence=0.92,
+                    confidence=0.95,
                     source=self.name,
                     sl_pips=sl_pips,
                     tp_pips=tp_pips,
                     atr=atr
                 )
 
-            # Confluence Vente : Bearish MSS + Bearish FVG
-            if bearish_mss and bearish_fvg:
-                logging.info(f"[{self.name}] 🔴 BEARISH SMC SETUP (MSS + FVG) sur {symbol} | ATR={atr:.5f}")
+            # Confluence Vente : Bearish MSS + Bearish FVG + Bearish OB
+            if bearish_mss and bearish_fvg and bearish_ob:
+                logging.debug(f"[{self.name}] 🔴 BEARISH SMC SETUP (MSS + FVG + OB) sur {symbol} | ATR={atr:.5f}")
                 return Signal(
                     symbol=symbol,
                     direction=OrderType.SELL,
-                    confidence=0.92,
+                    confidence=0.95,
                     source=self.name,
                     sl_pips=sl_pips,
                     tp_pips=tp_pips,

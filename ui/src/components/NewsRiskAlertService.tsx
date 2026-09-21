@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ActivePosition, RiskConfig } from '../types';
+import { getApiBaseUrl } from '../utils/api';
 import { 
   ShieldAlert, AlertTriangle, ShieldCheck, Newspaper, Zap, RefreshCw, Flame, Sliders, Lock, ArrowDownRight, ArrowUpRight, Activity, Clock, CheckCircle2, PauseCircle, PlayCircle, Shield
 } from 'lucide-react';
@@ -51,24 +52,39 @@ export const NewsRiskAlertService: React.FC<NewsRiskAlertServiceProps> = ({
   const [activeHedges, setActiveHedges] = useState<{ id: string; symbol: string; volume: number; entryPrice: number }[]>([]);
 
   // Logs of automated risk triggers
-  const [eventLogs, setEventLogs] = useState<NewsRiskLogEntry[]>([
-    {
-      id: 'log-1',
-      time: '18:42:10',
-      headline: 'Royaume-Uni: Ventes au détail inférieures aux attentes (-1.2% m/m)',
-      sentimentScore: -0.74,
-      actionTaken: 'Couverture Protectrice (Hedge 0.10 lot GBPUSD) Déclenchée',
-      severity: 'WARNING'
-    },
-    {
-      id: 'log-2',
-      time: '17:15:00',
-      headline: 'FED: Powell évoque une trajectoire assouplie',
-      sentimentScore: 0.85,
-      actionTaken: 'Surveillance Ordinaire - Sentiment Positif',
-      severity: 'NORMAL'
-    }
-  ]);
+  const [eventLogs, setEventLogs] = useState<NewsRiskLogEntry[]>([]);
+  const [isFetching, setIsFetching] = useState<boolean>(true);
+
+  // Poll for real news events from Python API
+  useEffect(() => {
+    if (!isEnabled) return;
+    
+    const fetchNews = async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/news-events`);
+        const newsData: NewsRiskLogEntry[] = await res.json();
+        
+        if (newsData && newsData.length > 0) {
+          setEventLogs(newsData);
+          setLatestHeadline(newsData[0].headline);
+          
+          // Calculate average sentiment for dashboard
+          const avgSentiment = newsData.reduce((acc, curr) => acc + curr.sentimentScore, 0) / newsData.length;
+          setCurrentSentiment(avgSentiment);
+          setIsFetching(false);
+        }
+      } catch (e) {
+        // Silent fail
+      }
+    };
+    
+    // Initial fetch
+    fetchNews();
+    
+    // Fetch every 15 seconds
+    const interval = setInterval(fetchNews, 15000);
+    return () => clearInterval(interval);
+  }, [isEnabled]);
 
   // Cooldown timer handler
   useEffect(() => {

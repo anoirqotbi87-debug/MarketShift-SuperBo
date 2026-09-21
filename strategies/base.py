@@ -95,19 +95,31 @@ class StrategyBase(IStrategy):
         sl_pips = round((atr * self.sl_multiplier) / pip_size, 1)
         tp_pips = round((atr * self.tp_multiplier) / pip_size, 1)
 
-        # Limites de sécurité
-        sl_pips = max(5.0, min(sl_pips, 200.0))
-        tp_pips = max(8.0, min(tp_pips, 400.0))
+        # Ajustement spécifique pour les Cryptos (qui ont une volatilité extrême en intra-day)
+        if pip_size >= 1.0:
+            sl_pips *= 3.0  # On donne 3x plus de marge au Bitcoin
+            tp_pips *= 3.0
+            
+        # Limites de sécurité dynamiques selon l'actif
+        if pip_size >= 1.0:  # Crypto (BTC, ETH) -> pips = dollars
+            sl_pips = max(50.0, min(sl_pips, 5000.0))
+            tp_pips = max(100.0, min(tp_pips, 10000.0))
+        elif pip_size == 0.1: # XAUUSD / GOLD -> pips = 0.1$
+            sl_pips = max(10.0, min(sl_pips, 1000.0))
+            tp_pips = max(20.0, min(tp_pips, 2000.0))
+        else: # Forex Standard
+            sl_pips = max(15.0, min(sl_pips, 200.0))
+            tp_pips = max(20.0, min(tp_pips, 400.0))
 
         return sl_pips, tp_pips, atr
 
     @staticmethod
     def get_pip_size(symbol: str) -> float:
         """Retourne la taille d'un pip selon le symbole.
-        Gère les suffixes broker XM (#) et noms alternatifs (GOLD# = Or).
+        Gère les suffixes broker XM (#, micro) et noms alternatifs (GOLD# = Or).
         """
-        # Normaliser : supprimer # et suffixes broker
-        s = symbol.upper().replace('#', '').replace('.', '')
+        # Normaliser : supprimer #, . et suffixes broker
+        s = symbol.upper().replace('#', '').replace('.', '').replace('MICRO', '')
         if 'JPY' in s:
             return 0.01     # Paires JPY
         elif 'XAU' in s or s == 'GOLD':

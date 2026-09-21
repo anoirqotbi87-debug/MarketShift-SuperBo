@@ -1,22 +1,30 @@
 import React, { useState } from 'react';
 import { MLModelStats } from '../../types';
-import { Cpu, RefreshCw, Layers, CheckCircle2, Zap } from 'lucide-react';
+import { Cpu, RefreshCw, Layers, CheckCircle2, Zap, TrendingUp, TrendingDown } from 'lucide-react';
 import { FeatureImpactChart } from '../FeatureImpactChart';
 import { StrategyValidator } from '../StrategyValidator';
 import { LiveMLLatencyChart } from '../LiveMLLatencyChart';
 import { StrategyOptimizer } from '../StrategyOptimizer';
 import { CollapsibleSection } from '../CollapsibleSection';
+import { getApiBaseUrl } from '../../utils/api';
 
 interface MLEngineTabProps {
   mlStats: MLModelStats;
+  executeTrade?: (symbol: string, direction: 'BUY' | 'SELL') => Promise<any>;
 }
 
-export const MLEngineTab: React.FC<MLEngineTabProps> = ({ mlStats }) => {
+export const MLEngineTab: React.FC<MLEngineTabProps> = ({ mlStats, executeTrade }) => {
   const [isRetraining, setIsRetraining] = useState<boolean>(false);
   const [selectedArchitecture, setSelectedArchitecture] = useState<string>('XGBoost + LSTM Ensemble');
 
-  const handleTriggerRetrain = () => {
+  const handleTriggerRetrain = async () => {
     setIsRetraining(true);
+    try {
+      await fetch(`${getApiBaseUrl()}/ml/retrain`, { method: 'POST' });
+    } catch (e) {
+      console.error("Erreur lancement entraînement:", e);
+    }
+    // L'effet visuel tourne un peu pour montrer la prise en compte
     setTimeout(() => {
       setIsRetraining(false);
     }, 2500);
@@ -25,6 +33,44 @@ export const MLEngineTab: React.FC<MLEngineTabProps> = ({ mlStats }) => {
   return (
     <div className="space-y-4 text-slate-100 text-xs">
       
+      <CollapsibleSection
+        title="Passage d'Ordre Manuel (Signal IA)"
+        icon={<Zap className="w-4 h-4" />}
+        defaultExpanded={true}
+      >
+        <div className="space-y-4 p-1">
+          <div className="flex items-center justify-between bg-slate-900/50 p-3 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${mlStats.currentSignal.direction === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {mlStats.currentSignal.direction === 'BUY' ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+              </div>
+              <div>
+                <div className="font-bold text-white text-sm">{mlStats.currentSignal.symbol}</div>
+                <div className="text-[10px] text-slate-400">Force: {mlStats.currentSignal.confidence}%</div>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => executeTrade && executeTrade(mlStats.currentSignal.symbol, 'BUY')}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[10px] transition-all"
+              >
+                ACHETER
+              </button>
+              <button
+                onClick={() => executeTrade && executeTrade(mlStats.currentSignal.symbol, 'SELL')}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-bold text-[10px] transition-all"
+              >
+                VENDRE
+              </button>
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-500 text-center">
+            Note: L'ordre sera exécuté avec le lot calculé par le Kelly Sizer (Risk Engine).
+          </p>
+        </div>
+      </CollapsibleSection>
+
       {/* Model Header */}
       <CollapsibleSection
         title="Modèle d'IA & Inférence"

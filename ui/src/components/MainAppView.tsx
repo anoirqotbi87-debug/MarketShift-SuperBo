@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ActiveTabSimulator, MT5AccountState, ActivePosition, ClosedTrade, MLModelStats, RiskConfig, LogEntry, PriceAlert 
 } from '../types';
@@ -38,6 +38,8 @@ interface MainAppViewProps {
   onApplyNewsWeightToML?: (boostPct: number, reason: string) => void;
   executeTrade?: (symbol: string, direction: 'BUY' | 'SELL') => Promise<any>;
   closePosition?: (ticket: number) => Promise<any>;
+  activeTab: ActiveTabSimulator;
+  setActiveTab: (tab: ActiveTabSimulator) => void;
 }
 
 export const MainAppView: React.FC<MainAppViewProps> = ({
@@ -56,9 +58,10 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
   onResetCircuitBreaker,
   onApplyNewsWeightToML,
   executeTrade,
-  closePosition
+  closePosition,
+  activeTab,
+  setActiveTab
 }) => {
-  const [activeTab, setActiveTab] = useState<ActiveTabSimulator>('dashboard');
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
   const [isDepositModalOpen, setIsDepositModalOpen] = useState<boolean>(false);
 
@@ -180,8 +183,8 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
       {/* Toast Notification Overlay for Price Alerts */}
       <PriceAlertToastOverlay toasts={activeToasts} onDismiss={handleDismissToast} />
 
-      {/* 2026 Adaptive Navigation: Sidebar (Desktop) / Bottom Bar (Mobile) */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 p-2 sm:p-4 pb-4 sm:pb-6 pointer-events-none md:pointer-events-auto md:static md:w-24 md:h-full md:p-0 md:bg-slate-950 md:border-r md:border-slate-800 md:flex md:flex-col md:items-center md:py-6">
+      {/* Adaptive Navigation: Sidebar (Desktop) / Top Horizontal Bar (Mobile) */}
+      <div className="relative md:static md:w-24 md:h-full md:p-0 bg-slate-950/80 border-b md:border-b-0 md:border-r border-slate-800 flex md:flex-col items-center py-2 md:py-6 w-full z-40">
         
         {/* Desktop Brand Logo / Status */}
         <div className="hidden md:flex flex-col items-center mb-8 gap-2">
@@ -190,15 +193,19 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
           </div>
         </div>
 
-        <div className="max-w-md mx-auto pointer-events-auto md:max-w-none md:w-full md:flex-1 md:flex md:flex-col md:gap-4 md:px-3 md:justify-center">
-          <div className="bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl flex items-center justify-start overflow-x-auto no-scrollbar px-2 py-2 shadow-2xl shadow-indigo-900/20 md:bg-transparent md:border-none md:shadow-none md:flex-col md:gap-6 md:px-0">
+        <div className="max-w-md mx-auto pointer-events-auto md:max-w-none md:w-full md:flex-1 md:flex md:flex-col md:gap-4 md:px-3 md:justify-center md:overflow-hidden">
+            <div 
+            className="flex items-center justify-start overflow-x-auto no-scrollbar px-2 gap-2 md:flex-col md:gap-6 md:px-0 md:overflow-y-auto select-none"
+          >
             {bottomNav.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as ActiveTabSimulator)}
+                  onClick={() => {
+                    setActiveTab(tab.id as ActiveTabSimulator);
+                  }}
                   className={`flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all flex-shrink-0 min-w-[64px] md:w-full md:p-3 md:hover:bg-slate-900/50 ${
                     isActive
                       ? 'text-indigo-400 md:bg-slate-900/80 md:border md:border-slate-800'
@@ -276,7 +283,7 @@ export const MainAppView: React.FC<MainAppViewProps> = ({
           <DailyProfitProgressBar accountState={accountState} />
 
           {/* Active Tab Screen Content - Expanded Height to accommodate Bottom Bar */}
-          <div className="flex-1 p-3 pb-24 min-h-[550px] relative overflow-y-auto no-scrollbar">
+          <div className="flex-1 p-3 pb-32 relative overflow-y-auto">
             {activeTab === 'dashboard' && (
               <div className="space-y-3">
                 <ClosedTradesChart closedTrades={closedTrades} />

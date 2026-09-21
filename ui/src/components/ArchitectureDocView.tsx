@@ -43,10 +43,10 @@ export const ArchitectureDocView: React.FC = () => {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-950/80 border border-indigo-700/60 rounded-full text-indigo-300 text-xs font-mono font-bold mb-3 uppercase tracking-wider">
               <BookOpen className="w-3.5 h-3.5" />
-              Spécification Technique MarketShift Pro V3.4
+              Spécification Technique MarketShift SuperBot V2.0
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight uppercase">
-              Plan d'Action Technique : MarketShift Pro V3.4
+              Plan d'Action Technique : MarketShift SuperBot V2.0
             </h1>
             <p className="text-slate-300 text-sm mt-2 max-w-3xl leading-relaxed">
               Guide complet d'architecture logicielle, spécifications de l'application mobile Kotlin Jetpack Compose, pipeline de prédiction Machine Learning d'ensemble et bridge MT5 ZeroMQ à haute fréquence.

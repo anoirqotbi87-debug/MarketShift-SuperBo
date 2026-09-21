@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ViewMode, ThemeMode, MT5AccountState, RiskConfig } from '../types';
 import { LogOut, ShieldAlert, Cpu, FileText, Smartphone, RefreshCw, Zap, WifiOff, AlertTriangle, Play, Radio, Sun, Moon, Contrast, Fingerprint, ChevronDown, Settings2, Wifi, Radio as WsRadio } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
@@ -19,6 +20,7 @@ interface HeaderProps {
   onForceReconnect?: () => void;
   onSimulateDisconnect?: () => void;
   wsStatus?: WsStatus;
+  wsErrorMsg?: string;
   onWsReconnect?: () => void;
 }
 
@@ -36,11 +38,18 @@ export const Header: React.FC<HeaderProps> = ({
   onForceReconnect,
   onSimulateDisconnect,
   wsStatus,
+  wsErrorMsg,
   onWsReconnect,
 }) => {
   const [isBioModalOpen, setIsBioModalOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isThemeMenuOpen, setIsThemeMenuOpen] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    const handleOpenSettings = () => setIsSettingsOpen(true);
+    window.addEventListener('open-settings', handleOpenSettings);
+    return () => window.removeEventListener('open-settings', handleOpenSettings);
+  }, []);
   const togglePaperTrading = () => {
     setAccountState(prev => ({
       ...prev,
@@ -95,47 +104,17 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-base sm:text-lg font-bold text-white tracking-tight uppercase">MarketShift Pro V3.4</h1>
+                  <h1 className="text-base sm:text-lg font-bold text-white tracking-tight uppercase">MarketShift SuperBot V2.0</h1>
                   <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-indigo-950/80 text-indigo-300 border border-indigo-700/60 rounded-md uppercase tracking-wider">
-                    v3.4 Android
+                    v2.0 Android
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-mono tracking-wide">ARCHITECTURE ML MOBILE-FIRST & CENTRE DE CONTRÔLE</p>
               </div>
             </div>
 
-            {/* View Switcher Mobile */}
-            <div className="flex md:hidden bg-slate-900 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={() => setViewMode('simulator')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                  viewMode === 'simulator'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                App
-              </button>
-              <button
-                onClick={() => setViewMode('doc')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                  viewMode === 'doc'
-                    ? 'bg-indigo-600 text-white shadow-sm'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Plan
-              </button>
-            </div>
-            {/* Settings button on Mobile (moved here for absolute top-right visibility) */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="md:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-700/50 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50 hover:text-white transition-all shadow-sm font-bold text-xs"
-              title="Paramètres de l'application"
-            >
-              <Settings2 className="w-4 h-4" />
-              <span>PARAMÈTRES</span>
-            </button>
+            {/* View Switcher Mobile - Removed, handled by BottomNavigation */}
+            {/* Removed mobile settings button from top bar */}
           </div>
 
           {/* Center: Main View Toggle Desktop */}
@@ -167,15 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Right Status Controls */}
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end font-mono mt-2 md:mt-0">
 
-            {/* Settings Button (Desktop Only - Mobile is in logo row) */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-700/50 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/50 hover:text-white transition-all shadow-sm font-bold text-xs"
-              title="Paramètres de l'application"
-            >
-              <Settings2 className="w-4 h-4" />
-              <span>PARAMÈTRES</span>
-            </button>
+            {/* Removed desktop settings button from top bar */}
 
             {/* WebSocket Status Indicator */}
             {wsStatus && (
@@ -197,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ) : wsStatus === 'fallback_polling' ? (
                   <><WifiOff className="w-3 h-3" /><span>POLL</span></>
                 ) : (
-                  <><AlertTriangle className="w-3 h-3" /><span>WS ERR</span></>
+                  <><AlertTriangle className="w-3 h-3" /><span>WS ERR {wsErrorMsg ? `(${wsErrorMsg})` : ''}</span></>
                 )}
               </button>
             )}
@@ -225,7 +196,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Auth Logout */}
             <button
               onClick={() => signOut(auth)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-all shadow-sm"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-300 hover:bg-slate-800 transition-all shadow-sm"
               title="Sign Out"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -235,7 +206,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Paper / Real Toggle */}
             <button
               onClick={togglePaperTrading}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold tracking-wide transition-all ${
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold tracking-wide transition-all ${
                 accountState.isPaperTrading
                   ? 'bg-amber-950/60 border-amber-700/60 text-amber-300 hover:bg-amber-900/60'
                   : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300 hover:bg-emerald-900/60'
@@ -247,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             {/* Theme Mode Toggler Menu */}
-            <div className="relative">
+            <div className="relative hidden md:block">
               <button
                 onClick={() => setIsThemeMenuOpen(!isThemeMenuOpen)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm ${
@@ -355,76 +326,30 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Biometric Prompt Modal for Header Reset */}
-        {riskConfig && setRiskConfig && (
-        <SettingsModal 
-          isOpen={isSettingsOpen} 
-          onClose={() => setIsSettingsOpen(false)} 
-          riskConfig={riskConfig}
-          setRiskConfig={setRiskConfig as any}
-        />
-      )}
-      <BiometricAuthModal
-          isOpen={isBioModalOpen}
-          onClose={() => setIsBioModalOpen(false)}
-          onSuccess={() => {
-            if (onResetCircuitBreaker) onResetCircuitBreaker();
-          }}
-          title="Réarmement Sécurisé du Bot MT5"
-          description="Empreinte digitale / Face ID requise pour réinitialiser le coupe-circuit d'urgence et réautoriser le passage d'ordres."
-          actionLabel="Réarmer Coupe-Circuit"
-        />
-
-        {/* RECONNECTION PROGRESS BAR BANNER (Triggers automatically when isConnected is false) */}
-        {!accountState.isConnected && (
-          <div className="bg-red-950/90 border border-red-700/80 rounded-2xl p-3 shadow-2xl backdrop-blur-md text-red-100 font-mono space-y-2 animate-slideDown">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-              
-              <div className="flex items-center gap-2">
-                <div className="p-1.5 bg-red-900/80 border border-red-600 rounded-xl text-red-300 animate-pulse shrink-0">
-                  <WifiOff className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="font-bold text-white flex items-center gap-2 uppercase tracking-wide">
-                    <span>Coupure MT5 Détectée</span>
-                    <span className="px-2 py-0.2 bg-red-900/80 text-amber-300 border border-amber-600/80 text-[10px] rounded-full font-mono">
-                      Backoff Exponentiel #{reconn?.attempt || 1}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-red-200/90 font-sans">
-                    Prochaine tentative dans <span className="font-bold text-amber-300">{reconn?.nextAttemptInSec || 2.0}s</span> (Délai exponentiel : {(reconn?.backoffDelayMs || 2000) / 1000}s)
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
-                  onClick={onForceReconnect || handleToggleConnectionState}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-bold text-[11px] flex items-center gap-1.5 shadow-md transition-all uppercase tracking-wider shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Forcer Reconnexion</span>
-                </button>
-              </div>
-
-            </div>
-
-            {/* Progress Bar Track */}
-            <div className="space-y-1">
-              <div className="w-full bg-slate-900/90 h-2 rounded-full overflow-hidden border border-red-800/80">
-                <div 
-                  className="h-full bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 transition-all duration-75 ease-linear rounded-full shadow-[0_0_12px_rgba(245,158,11,0.6)]"
-                  style={{ width: `${reconn?.progressPct || 0}%` }}
-                />
-              </div>
-
-              <div className="flex justify-between text-[9px] text-red-300/80 font-sans">
-                <span>Raison: {reconn?.lastDisconnectReason || 'Interruption Socket ZeroMQ'}</span>
-                <span>Progression : {Math.round(reconn?.progressPct || 0)}%</span>
-              </div>
-            </div>
-
-          </div>
+        {riskConfig && setRiskConfig && typeof document !== 'undefined' && createPortal(
+          <SettingsModal 
+            isOpen={isSettingsOpen} 
+            onClose={() => setIsSettingsOpen(false)} 
+            riskConfig={riskConfig}
+            setRiskConfig={setRiskConfig as any}
+          />,
+          document.body
         )}
+        
+        {typeof document !== 'undefined' && createPortal(
+          <BiometricAuthModal
+            isOpen={isBioModalOpen}
+            onClose={() => setIsBioModalOpen(false)}
+            onSuccess={() => {
+              if (onResetCircuitBreaker) onResetCircuitBreaker();
+            }}
+            title="Réarmement Sécurisé du Bot MT5"
+            description="Empreinte digitale / Face ID requise pour réinitialiser le coupe-circuit d'urgence et réautoriser le passage d'ordres."
+            actionLabel="Réarmer Coupe-Circuit"
+          />,
+          document.body
+        )}
+
 
       </div>
     </header>

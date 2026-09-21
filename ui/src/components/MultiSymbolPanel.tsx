@@ -53,46 +53,72 @@ export const MultiSymbolPanel: React.FC<MultiSymbolPanelProps> = ({
 }) => {
   const [symbolRows, setSymbolRows] = useState<SymbolRow[]>([]);
 
-  // Construire les lignes à partir des données WebSocket
+  const [apiSymbols, setApiSymbols] = useState<any[]>([]);
+
+  // Fetch API symbols periodically or once if WS fails to provide them
   useEffect(() => {
-    const rows: SymbolRow[] = Object.entries(symbols).map(([symbol, signal]) => {
-      const openPositions = positions.filter(p => p.symbol === symbol);
-      const pnl = openPositions.reduce((sum, p) => sum + p.profit, 0);
-
-      return {
-        symbol,
-        signal: {
-          direction:  signal.direction,
-          confidence: signal.confidence,
-          source:     signal.source || '—',
-          sl_pips:    signal.sl_pips,
-          tp_pips:    signal.tp_pips,
-        },
-        openPositions: openPositions.length,
-        unrealizedPnL: pnl,
-      };
-    });
-
-    // Si pas de données WS, essayer de fetch via HTTP
-    if (rows.length === 0 && isConnected && localBridgeIp) {
-      let ip = localBridgeIp;
-      if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
+    if (!isConnected || !localBridgeIp) return;
+    
+    let ip = localBridgeIp;
+    if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
+    
+    let isMounted = true;
+    const fetchSymbols = () => {
       fetch(`${ip}/symbols`)
         .then(r => r.json())
         .then((data: any[]) => {
-          setSymbolRows(data.map(d => ({
-            symbol:        d.symbol,
-            signal:        d.signal,
-            openPositions: d.openPositions,
-            unrealizedPnL: d.unrealizedPnL,
-          })));
+          if (isMounted) setApiSymbols(data);
         })
         .catch(() => {});
-      return;
-    }
+    };
 
-    setSymbolRows(rows);
-  }, [symbols, positions, isConnected, localBridgeIp]);
+    fetchSymbols();
+    const interval = setInterval(fetchSymbols, 5000); // Fetch every 5s instead of every tick
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [isConnected, localBridgeIp]);
+
+  // Construire les lignes à partir des données WebSocket ou API
+  useEffect(() => {
+    // Si on a des données WS (via l'objet symbols qui est non vide)
+    const wsKeys = Object.keys(symbols || {});
+    
+    if (wsKeys.length > 0) {
+      const rows: SymbolRow[] = Object.entries(symbols).map(([symbol, signal]: [string, any]) => {
+        const openPositions = positions.filter(p => p.symbol === symbol);
+        const pnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+
+        return {
+          symbol,
+          signal: {
+            direction:  signal.direction,
+            confidence: signal.confidence,
+            source:     signal.source || '—',
+            sl_pips:    signal.sl_pips,
+            tp_pips:    signal.tp_pips,
+          },
+          openPositions: openPositions.length,
+          unrealizedPnL: pnl,
+        };
+      });
+      setSymbolRows(rows);
+    } else {
+      // Sinon on utilise les données de l'API
+      const rows = apiSymbols.map(d => {
+        const openPositions = positions.filter(p => p.symbol === d.symbol);
+        const pnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+        return {
+          symbol:        d.symbol,
+          signal:        d.signal,
+          openPositions: openPositions.length > 0 ? openPositions.length : d.openPositions,
+          unrealizedPnL: openPositions.length > 0 ? pnl : d.unrealizedPnL,
+        };
+      });
+      setSymbolRows(rows);
+    }
+  }, [symbols, positions, apiSymbols]);
 
   const getDirectionIcon = (dir: string) => {
     if (dir === 'BUY')  return <TrendingUp  className="w-3 h-3" />;

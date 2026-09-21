@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { LogEntry, AccountState, Position } from '../../types';
 import { Terminal, Search, Trash2, Filter, Download, Activity, DollarSign, Briefcase, ChevronDown, ChevronRight, CheckCircle2, XCircle } from 'lucide-react';
 import { exportLogsToCSV } from '../../utils/csvExport';
@@ -14,6 +14,14 @@ export const LogsTab: React.FC<LogsTabProps> = ({ logs, onClearLogs, accountStat
   const [filterLevel, setFilterLevel] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [expandedCycles, setExpandedCycles] = useState<Record<string, boolean>>({});
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll vers le haut quand les logs changent (car les plus récents sont en haut)
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [logs]);
 
   // Filtrage initial
   const filteredLogs = useMemo(() => {
@@ -36,7 +44,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({ logs, onClearLogs, accountStat
       }
       groups[timeKey].push(log);
     });
-    // Trier les clés (timestamps) du plus récent au plus ancien
+    // Trier les clés (timestamps) du plus récent au plus ancien (En haut)
     const sortedKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
     
     // Convertir en array
@@ -69,7 +77,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({ logs, onClearLogs, accountStat
   };
 
   // Calculs pour le résumé
-  const totalPnL = positions.reduce((sum, p) => sum + (p.profit || 0), 0);
+  const totalPnL = positions.reduce((sum, p) => sum + (p.pnl || 0), 0);
 
   return (
     <div className="space-y-4 text-slate-100 text-xs flex flex-col h-full">
@@ -153,7 +161,7 @@ export const LogsTab: React.FC<LogsTabProps> = ({ logs, onClearLogs, accountStat
       </div>
 
       {/* 3. GROUPED LOGS STREAM */}
-      <div className="flex-1 min-h-[300px] overflow-y-auto space-y-3 pb-4 no-scrollbar">
+      <div ref={scrollRef} className="flex-1 min-h-[300px] overflow-y-auto space-y-3 pb-4 no-scrollbar scroll-smooth">
         {groupedLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2 mt-10">
              <Terminal className="w-8 h-8 opacity-20" />

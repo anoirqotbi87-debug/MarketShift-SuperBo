@@ -18,7 +18,10 @@ class CircuitBreaker:
 
         # Initialisation de la balance de départ (simulée pour le moment)
         if self.initial_balance == 0.0:
-            self.initial_balance = account.balance
+            if account.balance > 0:
+                self.initial_balance = account.balance
+            else:
+                return True  # Balance non encore chargée
 
         current_equity = account.equity
         loss_pct = (self.initial_balance - current_equity) / self.initial_balance

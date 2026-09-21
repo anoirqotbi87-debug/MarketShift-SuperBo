@@ -48,20 +48,10 @@ class EMACrossoverStrategy(StrategyBase):
                 window=14
             )
             current_adx = adx_indicator.adx().iloc[-1]
-            if pd.isna(current_adx) or current_adx < 20.0:
+            if pd.isna(current_adx) or current_adx < 15.0:
                 return None # Marché en range, on ignore le croisement
 
-            # --- Filtre Volume (Pression institutionnelle) ---
-            vol_col = 'tick_volume' if 'tick_volume' in self._df.columns else 'volume' if 'volume' in self._df.columns else None
-            vol_ok = True
-            if vol_col:
-                current_vol = self._df[vol_col].iloc[-1]
-                avg_vol = self._df[vol_col].rolling(20).mean().iloc[-1]
-                if pd.notna(avg_vol) and current_vol < avg_vol:
-                    vol_ok = False
-            
-            if not vol_ok:
-                return None # Volume insuffisant pour valider le mouvement
+            # Filtre Volume supprimé pour le Forex (souvent non représentatif)
 
             # Calculer SL/TP basés sur l'ATR
             pip_size = self.get_pip_size(symbol)
@@ -69,7 +59,7 @@ class EMACrossoverStrategy(StrategyBase):
 
             # Golden Cross (Achat)
             if current_short > current_long and prev_short <= prev_long:
-                logging.info(
+                logging.debug(
                     f"[{self.name}] 🟢 GOLDEN CROSS sur {symbol} | "
                     f"ATR={atr:.5f} | SL={sl_pips:.1f}p | TP={tp_pips:.1f}p"
                 )
@@ -85,7 +75,7 @@ class EMACrossoverStrategy(StrategyBase):
 
             # Death Cross (Vente)
             if current_short < current_long and prev_short >= prev_long:
-                logging.info(
+                logging.debug(
                     f"[{self.name}] 🔴 DEATH CROSS sur {symbol} | "
                     f"ATR={atr:.5f} | SL={sl_pips:.1f}p | TP={tp_pips:.1f}p"
                 )

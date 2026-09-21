@@ -17,7 +17,7 @@ class AppConfig(BaseSettings):
     MAX_POSITIONS: int = Field(5, ge=1)
 
     # ── Risk settings ────────────────────────────────────────────────────────
-    MAX_DAILY_LOSS_PCT: float = Field(0.05, ge=0.0, le=1.0)
+    MAX_DAILY_LOSS_PCT: float = Field(0.05, ge=0.0)
     MAX_RISK_PER_TRADE_PCT: float = Field(0.01, ge=0.0, le=1.0)
     EMERGENCY_CLOSE_ENABLED: bool = Field(True)
     CIRCUIT_BREAKER_MAX_VIOLATIONS: int = Field(5, ge=1)
@@ -38,6 +38,10 @@ class AppConfig(BaseSettings):
     EXNESS_PASSWORD: str = Field("")
     EXNESS_SERVER: str = Field("")
 
+    # ── Telegram Alert Settings ──────────────────────────────────────────────
+    TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot API Token")
+    TELEGRAM_CHAT_ID: str = Field(default="", description="Telegram Chat ID for alerts")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -47,6 +51,13 @@ class AppConfig(BaseSettings):
     @property
     def TRADING_SYMBOLS(self) -> List[str]:
         return [s.strip() for s in self.TRADING_SYMBOLS_RAW.split(",") if s.strip()]
+
+    @property
+    def is_telegram_enabled(self) -> bool:
+        return bool(
+            self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_BOT_TOKEN.strip() and
+            self.TELEGRAM_CHAT_ID and self.TELEGRAM_CHAT_ID.strip()
+        )
 
     @field_validator('ACTIVE_BROKER', mode='after')
     @classmethod
@@ -73,6 +84,30 @@ class AppConfig(BaseSettings):
         except ValueError:
             logging.error("Le login MT5 doit être un nombre")
             return 0, password, server
+
+    def get_symbol_sl_multiplier(self, symbol: str) -> float:
+        import os
+        val = os.getenv(f"ATR_SL_MULTIPLIER_{symbol}")
+        if val is not None:
+            try: return float(val)
+            except ValueError: pass
+        return self.ATR_SL_MULTIPLIER
+
+    def get_symbol_tp_multiplier(self, symbol: str) -> float:
+        import os
+        val = os.getenv(f"ATR_TP_MULTIPLIER_{symbol}")
+        if val is not None:
+            try: return float(val)
+            except ValueError: pass
+        return self.ATR_TP_MULTIPLIER
+        
+    def get_symbol_ml_confidence(self, symbol: str) -> float:
+        import os
+        val = os.getenv(f"ML_CONFIDENCE_THRESHOLD_{symbol}")
+        if val is not None:
+            try: return float(val)
+            except ValueError: pass
+        return self.ML_CONFIDENCE_THRESHOLD
 
 try:
     Config = AppConfig()

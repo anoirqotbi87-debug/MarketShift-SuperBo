@@ -9,7 +9,7 @@ from strategies.base import StrategyBase
 class RsiMacdStrategy(StrategyBase):
     def __init__(self, name="RSI_MACD", weight=1.5, rsi_period=14,
                  rsi_overbought=70, rsi_oversold=30,
-                 sl_multiplier=1.5, tp_multiplier=2.5):
+                 sl_multiplier=2.0, tp_multiplier=3.0):
         super().__init__(name, weight, sl_multiplier=sl_multiplier, tp_multiplier=tp_multiplier)
         self.rsi_period     = rsi_period
         self.rsi_overbought = rsi_overbought
@@ -49,24 +49,36 @@ class RsiMacdStrategy(StrategyBase):
                 macro_trend_bullish = close_prices.iloc[-1] > ema_200
                 macro_trend_bearish = close_prices.iloc[-1] < ema_200
 
+            # --- NOUVEAU : Filtre de Régime de Marché (ADX) ---
+            # Si l'ADX > 25, le marché est en tendance forte. Le RSI (retour à la moyenne) perd en fiabilité.
+            try:
+                adx_series = ta.trend.adx(self._df['high'], self._df['low'], self._df['close'], window=14)
+                current_adx = adx_series.iloc[-1]
+            except Exception:
+                current_adx = 20.0 # Default to range if error
+
             # Calculer SL/TP basés sur l'ATR
             pip_size = self.get_pip_size(symbol)
             sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
 
+            # --- Régime Multiplier ---
+            # Réduit la confiance de 50% si le marché est en forte tendance (ADX > 25)
+            regime_multiplier = 0.5 if current_adx > 25 else 1.0
+
             # Condition d'Achat (Buy)
             # 1. Tendance macro haussière
-            # 2. RSI rebondit HORS de la zone de survente (prev <= 30 et current > 30)
+            # 2. RSI en hausse mais pas encore suracheté
             # 3. MACD s'incurve à la hausse
-            buy_rsi_bounce = prev_rsi <= self.rsi_oversold and current_rsi > self.rsi_oversold
-            if macro_trend_bullish and buy_rsi_bounce and current_macd_diff > prev_macd_diff and current_macd_diff < 0:
-                logging.info(
-                    f"[{self.name}] 🟢 Signal d'achat sur {symbol} (RSI rebond: {prev_rsi:.1f}->{current_rsi:.1f}) | "
+            buy_rsi_bounce = current_rsi > prev_rsi and current_rsi < 55
+            if macro_trend_bullish and buy_rsi_bounce and current_macd_diff > prev_macd_diff:
+                logging.debug(
+                    f"[{self.name}] 🟢 Signal d'achat sur {symbol} (RSI rebond: {prev_rsi:.1f}->{current_rsi:.1f}) | ADX={current_adx:.1f} | "
                     f"ATR={atr:.5f} | SL={sl_pips:.1f}p | TP={tp_pips:.1f}p"
                 )
                 return Signal(
                     symbol=symbol,
                     direction=OrderType.BUY,
-                    confidence=0.80,
+                    confidence=0.8 * regime_multiplier,
                     source=self.name,
                     sl_pips=sl_pips,
                     tp_pips=tp_pips,
@@ -75,18 +87,18 @@ class RsiMacdStrategy(StrategyBase):
 
             # Condition de Vente (Sell)
             # 1. Tendance macro baissière
-            # 2. RSI rebondit HORS de la zone de surachat (prev >= 70 et current < 70)
+            # 2. RSI en baisse mais pas encore survendu
             # 3. MACD s'incurve à la baisse
-            sell_rsi_bounce = prev_rsi >= self.rsi_overbought and current_rsi < self.rsi_overbought
-            if macro_trend_bearish and sell_rsi_bounce and current_macd_diff < prev_macd_diff and current_macd_diff > 0:
-                logging.info(
-                    f"[{self.name}] 🔴 Signal de vente sur {symbol} (RSI: {current_rsi:.2f}) | "
+            sell_rsi_bounce = current_rsi < prev_rsi and current_rsi > 45
+            if macro_trend_bearish and sell_rsi_bounce and current_macd_diff < prev_macd_diff:
+                logging.debug(
+                    f"[{self.name}] 🔴 Signal de vente sur {symbol} (RSI: {current_rsi:.2f}) | ADX={current_adx:.1f} | "
                     f"ATR={atr:.5f} | SL={sl_pips:.1f}p | TP={tp_pips:.1f}p"
                 )
                 return Signal(
                     symbol=symbol,
                     direction=OrderType.SELL,
-                    confidence=0.75,
+                    confidence=0.75 * regime_multiplier,
                     source=self.name,
                     sl_pips=sl_pips,
                     tp_pips=tp_pips,

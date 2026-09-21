@@ -22,9 +22,48 @@ Ré-entraînement automatique toutes les 4 heures.
 
 import logging
 import threading
+import multiprocessing
 import time
+import os
+import joblib
 from typing import Optional, Tuple
 import numpy as np
+
+MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+def _run_isolated_training(symbols: list):
+    """Exécuté dans un processus fantôme totalement séparé (Zero-Latency pour le bot)."""
+    import logging
+    from infrastructure.mt5_connector import MT5Connector
+    
+    # Configure un logger basique pour ce processus isolé
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - [ML-Worker] %(message)s")
+    logging.info("[ML-Worker] Démarrage du processus d'entraînement ML isolé (CPU intensif)...")
+    
+    from infrastructure.config import Config
+    
+    try:
+        xm_login = int(Config.XM_LOGIN) if Config.XM_LOGIN else 0
+    except ValueError:
+        xm_login = 0
+
+    connector = MT5Connector(xm_login, Config.XM_PASSWORD, Config.XM_SERVER)
+    if not connector.connect():
+        logging.error("[ML-Worker] Échec connexion MT5. Annulation.")
+        return
+        
+    # On instancie un trainer jetable juste pour la collecte et l'entraînement
+    trainer = MLTrainer()
+    trainer._connector = connector
+    trainer._symbols = symbols
+    
+    # Ce processus prendra 100% de CPU mais ne bloquera pas le Main Process
+    trainer._collect_and_train()
+    
+    connector.disconnect()
+    logging.info("[ML-Worker] Entraînement terminé, processus fantôme détruit.")
+
 
 try:
     import pandas as pd
@@ -49,11 +88,12 @@ class MLTrainer:
 
     RETRAIN_INTERVAL_HOURS = 4          # Ré-entraînement toutes les 4h
     MIN_SAMPLES_TO_TRAIN = 200          # Minimum de bougies pour entraîner
-    PREDICTION_HORIZON = 5              # Horizon de prédiction en barres
+    PREDICTION_HORIZON = 10             # Horizon étendu pour permettre au TP d'être touché (2h30 en M15)
     FEATURE_COLUMNS = [
         'ema_diff', 'rsi', 'macd_hist', 'atr_norm',
         'volume_rel', 'hour_sin', 'hour_cos',
-        'ret_1', 'ret_3', 'ret_5'
+        'ret_1', 'ret_3', 'ret_5',
+        'adx', 'bb_width'
     ]
 
     def __init__(self):
@@ -67,33 +107,106 @@ class MLTrainer:
         self._lock = threading.Lock()
         self._retrain_thread: Optional[threading.Thread] = None
         self._running = False
+        self._load_models()
+
+    def _load_models(self) -> None:
+        """Charge les modèles sauvegardés au démarrage pour éviter de trader à l'aveugle."""
+        if not ML_AVAILABLE: return
+        try:
+            xgb_path = os.path.join(MODEL_DIR, "xgb_model.pkl")
+            scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
+            lstm_path = os.path.join(MODEL_DIR, "lstm_model.pt")
+            
+            if os.path.exists(xgb_path) and os.path.exists(scaler_path) and os.path.exists(lstm_path):
+                self._xgb_model = joblib.load(xgb_path)
+                self._scaler = joblib.load(scaler_path)
+                
+                # Load PyTorch LSTM
+                self._lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
+                self._lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
+                self._lstm_model.eval()
+                
+                self._is_trained = True
+                self._last_trained = "Loaded from disk"
+                
+                # Charger les métadonnées si présentes
+                meta_path = os.path.join(MODEL_DIR, "model_meta.json")
+                if os.path.exists(meta_path):
+                    import json
+                    try:
+                        with open(meta_path, 'r') as f:
+                            meta = json.load(f)
+                            self._accuracy = meta.get("accuracy", 0.0)
+                            self._sample_count = meta.get("sample_count", 0)
+                            self._last_trained = meta.get("last_trained", "Loaded from disk")
+                    except Exception as e:
+                        logging.warning(f"[MLTrainer] Impossible de lire model_meta.json: {e}")
+
+                logging.info(f"[MLTrainer] [OK] Mémoire restaurée : Modèles chargés depuis le disque avec succès. (Acc: {self._accuracy:.1%}, Samples: {self._sample_count})")
+        except Exception as e:
+            logging.warning(f"[MLTrainer] Échec du chargement des modèles depuis le disque (Normal si 1er run): {e}")
 
     def start_auto_retrain(self, connector, symbols: list) -> None:
-        """Lance le thread de ré-entraînement automatique."""
+        """Lance le thread superviseur de ré-entraînement automatique."""
         if not ML_AVAILABLE:
             return
         self._running = True
-        self._connector = connector
         self._symbols = symbols
         self._retrain_thread = threading.Thread(
             target=self._auto_retrain_loop, daemon=True
         )
         self._retrain_thread.start()
-        logging.info("[MLTrainer] Thread de ré-entraînement automatique démarré.")
+        logging.info("[MLTrainer] Thread de supervision (Multiprocessing Hot-Reload) démarré.")
 
     def stop(self) -> None:
         self._running = False
 
-    def _auto_retrain_loop(self) -> None:
-        """Boucle de ré-entraînement toutes les RETRAIN_INTERVAL_HOURS."""
-        # MUST initialize MT5 in this background thread context
-        if not self._connector.connect():
-            logging.error("[MLTrainer] Impossible d'initialiser MT5 dans le thread ML.")
+    def force_retrain(self) -> None:
+        """Démarre un ré-entraînement forcé manuellement (Bouton UI)."""
+        if not ML_AVAILABLE or not getattr(self, '_symbols', None):
+            logging.warning("[MLTrainer] Impossible de forcer l'entraînement (ML non dispo ou symboles absents).")
             return
+        logging.info("[MLTrainer] 🚀 FORCE RETRAIN: Lancement manuel du ML-Worker (Processus Fantôme)...")
+        import subprocess
+        import sys
+        
+        symbols_str = ",".join(self._symbols)
+        worker_script = os.path.join(os.path.dirname(__file__), "ml_worker.py")
+        subprocess.Popen([sys.executable, worker_script, "--symbols", symbols_str])
 
+    def _auto_retrain_loop(self) -> None:
+        """Surveille le disque pour recharger les modèles (Hot-Reload) et lance les Workers toutes les 4h."""
+        xgb_path = os.path.join(MODEL_DIR, "xgb_model.pkl")
+        last_mtime = 0
+        if os.path.exists(xgb_path):
+            last_mtime = os.path.getmtime(xgb_path)
+            
+        last_train_time = time.time()
+        
         while self._running:
-            self._collect_and_train()
-            time.sleep(self.RETRAIN_INTERVAL_HOURS * 3600)
+            now = time.time()
+            
+            # 1. Faut-il lancer un nouvel entraînement ?
+            if (now - last_train_time) > (self.RETRAIN_INTERVAL_HOURS * 3600):
+                logging.info("[MLTrainer] 🚀 Lancement du ML-Worker (Processus Fantôme) en arrière-plan...")
+                import subprocess
+                import sys
+                symbols_str = ",".join(self._symbols)
+                worker_script = os.path.join(os.path.dirname(__file__), "ml_worker.py")
+                subprocess.Popen([sys.executable, worker_script, "--symbols", symbols_str])
+                last_train_time = now
+                
+            # 2. Hot-Reloading: Les modèles sur le disque ont-ils été mis à jour par le ML-Worker ?
+            if os.path.exists(xgb_path):
+                current_mtime = os.path.getmtime(xgb_path)
+                if current_mtime > last_mtime:
+                    logging.info("[MLTrainer] 🔄 Nouveaux modèles détectés sur le disque. Hot-Reloading instantané...")
+                    time.sleep(2) # Laisser le temps au ML-Worker de finir l'écriture disque
+                    self._load_models()
+                    last_mtime = current_mtime
+                    
+            # Check léger toutes les 10 secondes
+            time.sleep(10)
 
     def _collect_and_train(self) -> None:
         """Collecte les données depuis MT5 et lance l'entraînement."""
@@ -101,8 +214,8 @@ class MLTrainer:
             import MetaTrader5 as mt5
             all_dfs = []
             for symbol in self._symbols:
-                # Récupérer 1000 bougies M15 par symbole
-                df = self._connector.get_historical_data(symbol, mt5.TIMEFRAME_M15, 1000)
+                # Récupérer 5000 bougies M15 par symbole pour de meilleures fondations statistiques
+                df = self._connector.get_historical_data(symbol, mt5.TIMEFRAME_M5, 5000)
                 if df is not None and len(df) > self.MIN_SAMPLES_TO_TRAIN:
                     df['symbol'] = symbol
                     all_dfs.append(df)
@@ -160,7 +273,8 @@ class MLTrainer:
         # Heure encodée cycliquement (si colonne 'time' présente)
         if 'time' in df.columns:
             try:
-                hours = pd.to_datetime(df['time']).dt.hour
+                dt_col = pd.to_datetime(df['time'], utc=True)
+                hours = dt_col.dt.hour
                 df['hour_sin'] = np.sin(2 * np.pi * hours / 24)
                 df['hour_cos'] = np.cos(2 * np.pi * hours / 24)
             except Exception:
@@ -175,9 +289,39 @@ class MLTrainer:
         df['ret_3'] = df['close'].pct_change(3)
         df['ret_5'] = df['close'].pct_change(5)
 
-        # Label : direction future sur PREDICTION_HORIZON barres
+        # ADX Approximation
+        up_move = df['high'] - df['high'].shift(1)
+        down_move = df['low'].shift(1) - df['low']
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+        atr_14 = tr.rolling(14).mean().replace(0, 1e-9)
+        plus_di = 100 * (pd.Series(plus_dm, index=df.index).ewm(span=14, adjust=False).mean() / atr_14)
+        minus_di = 100 * (pd.Series(minus_dm, index=df.index).ewm(span=14, adjust=False).mean() / atr_14)
+        dx = 100 * (abs(plus_di - minus_di) / (plus_di + minus_di + 1e-9))
+        df['adx'] = dx.ewm(span=14, adjust=False).mean().fillna(0)
+
+        # Bollinger Bands Width
+        rolling_mean = df['close'].rolling(20).mean()
+        rolling_std = df['close'].rolling(20).std()
+        df['bb_width'] = ((rolling_std * 4) / df['close']).fillna(0)
+
+        # -------------------------------------------------------------
+        # Labeling : Simulation "Virtual Order" (Path Dependency Aware)
+        # -------------------------------------------------------------
+        # Calcul du min/max futur sur la fenêtre de N bougies
+        future_max = df['high'].rolling(self.PREDICTION_HORIZON).max().shift(-self.PREDICTION_HORIZON)
+        future_min = df['low'].rolling(self.PREDICTION_HORIZON).min().shift(-self.PREDICTION_HORIZON)
+
+        # Calcul dynamique du SL (1.5 ATR) et TP (2.0 ATR)
+        atr_val = tr.rolling(14).mean().replace(0, 1e-9)
+        virtual_sl = df['close'] - (1.5 * atr_val)
+        virtual_tp = df['close'] + (2.0 * atr_val)
+
+        # Label 1 (Gagnant) : Le TP est touché, ET le SL n'est jamais touché dans la fenêtre
+        df['label'] = ((future_max >= virtual_tp) & (future_min > virtual_sl)).astype(int)
+
+        # Conservé pour analyse (compatibilité)
         df['future_ret'] = df['close'].shift(-self.PREDICTION_HORIZON) / df['close'] - 1
-        df['label'] = (df['future_ret'] > 0).astype(int)
 
         return df.dropna()
 
@@ -212,6 +356,11 @@ class MLTrainer:
             X_train_s = scaler.fit_transform(X_train)
             X_test_s  = scaler.transform(X_test)
 
+            # Équilibrage des classes (Anti Perma-Bull)
+            num_pos = np.sum(y_train == 1)
+            num_neg = np.sum(y_train == 0)
+            scale_pos_weight = float(num_neg) / float(num_pos) if num_pos > 0 else 1.0
+
             # 1. Grid Search XGBoost (Walk-Forward Optimization Anti-Overfitting)
             logging.info("[MLTrainer] Lancement du Grid Search XGBoost avec TimeSeriesSplit (WFO)...")
             param_grid = {
@@ -220,7 +369,12 @@ class MLTrainer:
                 'learning_rate': [0.05, 0.1]
             }
             tscv = TimeSeriesSplit(n_splits=3) # Empêche le look-ahead bias dans la validation croisée
-            xgb = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+            xgb = XGBClassifier(
+                use_label_encoder=False, 
+                eval_metric='logloss', 
+                random_state=42,
+                scale_pos_weight=scale_pos_weight
+            )
             grid_search = GridSearchCV(estimator=xgb, param_grid=param_grid, cv=tscv, scoring='accuracy', n_jobs=-1)
             grid_search.fit(X_train_s, y_train)
             
@@ -265,8 +419,27 @@ class MLTrainer:
                 self._sample_count = len(processed)
                 self._last_trained = time.strftime("%Y-%m-%d %H:%M:%S")
 
+            # Persistance sur disque
+            try:
+                joblib.dump(best_xgb, os.path.join(MODEL_DIR, "xgb_model.pkl"))
+                joblib.dump(scaler, os.path.join(MODEL_DIR, "scaler.pkl"))
+                torch.save(lstm_model.state_dict(), os.path.join(MODEL_DIR, "lstm_model.pt"))
+                
+                import json
+                meta = {
+                    "accuracy": float(accuracy),
+                    "sample_count": int(len(processed)),
+                    "last_trained": self._last_trained
+                }
+                with open(os.path.join(MODEL_DIR, "model_meta.json"), 'w') as f:
+                    json.dump(meta, f)
+                    
+                logging.info("[MLTrainer] 💾 Modèles sauvegardés sur disque de manière permanente.")
+            except Exception as save_err:
+                logging.error(f"[MLTrainer] Échec de la sauvegarde sur disque : {save_err}")
+
             logging.info(
-                f"[MLTrainer] ✅ Modèle Ensemble (XGB+LSTM) entraîné — Samples: {len(processed)} | "
+                f"[MLTrainer] [OK] Modèle Ensemble (XGB+LSTM) entraîné — Samples: {len(processed)} | "
                 f"XGB Accuracy: {accuracy:.1%} | Dernière MAJ: {self._last_trained}"
             )
             return True

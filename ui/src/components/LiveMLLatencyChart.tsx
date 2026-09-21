@@ -3,6 +3,7 @@ import { MLModelStats } from '../types';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid 
 } from 'recharts';
+import { getApiBaseUrl } from '../utils/api';
 import { 
   Zap, Cpu, Activity, Clock, ShieldCheck, Gauge, RefreshCw, Sparkles, CheckCircle2, AlertTriangle, Layers
 } from 'lucide-react';
@@ -28,22 +29,14 @@ export const LiveMLLatencyChart: React.FC<LiveMLLatencyChartProps> = ({ mlStats 
   const [history, setHistory] = useState<LatencyDataPoint[]>(() => {
     const points: LatencyDataPoint[] = [];
     const now = Date.now();
-    const baseLatency = mlStats.inferenceTimeMs || 12.4;
-
     for (let i = 25; i >= 0; i--) {
       const timeStr = new Date(now - i * 2000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const jitter = (Math.random() - 0.5) * 3.5;
-      const total = Math.max(4.0, Math.round((baseLatency + jitter) * 10) / 10);
-      const prep = Math.round((total * 0.25) * 10) / 10;
-      const onnx = Math.round((total * 0.60) * 10) / 10;
-      const post = Math.round((total - prep - onnx) * 10) / 10;
-
       points.push({
         time: timeStr,
-        latencyMs: total,
-        preprocessMs: prep,
-        onnxInferenceMs: onnx,
-        postprocessMs: post,
+        latencyMs: 0,
+        preprocessMs: 0,
+        onnxInferenceMs: 0,
+        postprocessMs: 0,
         batchSize: 1
       });
     }
@@ -54,35 +47,23 @@ export const LiveMLLatencyChart: React.FC<LiveMLLatencyChartProps> = ({ mlStats 
   useEffect(() => {
     if (!isStreaming) return;
 
-    const interval = setInterval(() => {
-      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const baseLatency = mlStats.inferenceTimeMs || 12.4;
-      
-      // Introduce subtle random spikes or variations
-      const isSpike = Math.random() < 0.08;
-      const jitter = isSpike ? (Math.random() * 8.0 + 4.0) : ((Math.random() - 0.5) * 2.8);
-      const total = Math.max(4.2, Math.round((baseLatency + jitter) * 10) / 10);
-      const prep = Math.round((total * 0.22) * 10) / 10;
-      const onnx = Math.round((total * 0.63) * 10) / 10;
-      const post = Math.round((total - prep - onnx) * 10) / 10;
+    const fetchLatency = async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/ml-latency`);
+        const data = await res.json();
+        
+        setHistory(prev => {
+          const updated = [...prev.slice(1), data];
+          return updated;
+        });
+      } catch (e) {
+        // network error fallback
+      }
+    };
 
-      const newPoint: LatencyDataPoint = {
-        time: now,
-        latencyMs: total,
-        preprocessMs: prep,
-        onnxInferenceMs: onnx,
-        postprocessMs: post,
-        batchSize: 1
-      };
-
-      setHistory(prev => {
-        const updated = [...prev.slice(1), newPoint];
-        return updated;
-      });
-    }, 1800);
-
+    const interval = setInterval(fetchLatency, 1800);
     return () => clearInterval(interval);
-  }, [isStreaming, mlStats.inferenceTimeMs]);
+  }, [isStreaming]);
 
   // Derived latency statistics
   const currentLatency = history[history.length - 1]?.latencyMs || mlStats.inferenceTimeMs;

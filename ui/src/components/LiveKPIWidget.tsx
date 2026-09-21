@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Target, Activity, DollarSign, Briefcase } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 
 interface KPIMetrics {
   expectancy: number;
@@ -15,7 +16,7 @@ export const LiveKPIWidget: React.FC = () => {
 
   const fetchKPIs = async () => {
     try {
-      const res = await fetch(`http://${window.location.hostname}:8000/kpi`);
+      const res = await fetch(`${getApiBaseUrl()}/kpi`);
       if (res.ok) {
         const data = await res.json();
         setMetrics(data);

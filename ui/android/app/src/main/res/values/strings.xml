@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MarketShift</string>
+    <string name="title_activity_main">MarketShift</string>
+    <string name="package_name">com.marketshift.app</string>
+    <string name="custom_url_scheme">com.marketshift.app</string>
+</resources>

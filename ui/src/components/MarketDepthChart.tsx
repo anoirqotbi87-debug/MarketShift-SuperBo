@@ -3,6 +3,7 @@ import {
   Layers, Activity, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, 
   BarChart2, RefreshCw, Zap, ShieldAlert, Sparkles, Filter, ChevronDown, Check, Eye
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine 
 } from 'recharts';
@@ -52,58 +53,32 @@ export const MarketDepthChart: React.FC = () => {
   }, [symbol]);
 
   // Generate Order Book Bids and Asks
-  const [orderBook, setOrderBook] = useState<{ bids: OrderBookLevel[]; asks: OrderBookLevel[] }>(() => {
-    return generateOrderBookData(config.midPrice, config.step, depthLevelsCount, config.digits);
-  });
+  const [orderBook, setOrderBook] = useState<{ bids: OrderBookLevel[]; asks: OrderBookLevel[] }>({ bids: [], asks: [] });
 
   // Regenerate when symbol or levels count changes
   useEffect(() => {
-    setOrderBook(generateOrderBookData(currentMidPrice, config.step, depthLevelsCount, config.digits));
-  }, [symbol, depthLevelsCount, currentMidPrice]);
-
-  // Real-time ticking simulation
-  useEffect(() => {
     if (!isStreaming) return;
-
-    const interval = setInterval(() => {
-      // Random micro price tick
-      const tick = (Math.random() - 0.5) * (config.step * 0.4);
-      const newMid = Math.round((currentMidPrice + tick) * Math.pow(10, config.digits)) / Math.pow(10, config.digits);
-      setCurrentMidPrice(newMid);
-
-      // Jitter order book volumes
-      setOrderBook(prev => {
-        const newBids = prev.bids.map(b => {
-          const delta = (Math.random() - 0.48) * 3.5;
-          const vol = Math.max(1.2, Math.round((b.volume + delta) * 10) / 10);
-          return { ...b, volume: vol };
-        });
-
-        const newAsks = prev.asks.map(a => {
-          const delta = (Math.random() - 0.48) * 3.5;
-          const vol = Math.max(1.2, Math.round((a.volume + delta) * 10) / 10);
-          return { ...a, volume: vol };
-        });
-
-        // Recalculate cumulative
-        let cumBid = 0;
-        newBids.forEach(b => {
-          cumBid += b.volume;
-          b.totalVolume = Math.round(cumBid * 10) / 10;
-        });
-
-        let cumAsk = 0;
-        newAsks.forEach(a => {
-          cumAsk += a.volume;
-          a.totalVolume = Math.round(cumAsk * 10) / 10;
-        });
-
-        return { bids: newBids, asks: newAsks };
-      });
-    }, 1500);
-
+    
+    const fetchDepth = async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/market-depth?symbol=${symbol}`);
+        const data = await res.json();
+        
+        if (data && data.bids && data.asks) {
+          setOrderBook({ bids: data.bids, asks: data.asks });
+          setCurrentMidPrice(data.midPrice);
+        }
+      } catch (e) {
+        // Silent fail, keep old data
+      }
+    };
+    
+    // Initial fetch
+    fetchDepth();
+    
+    const interval = setInterval(fetchDepth, 1500);
     return () => clearInterval(interval);
-  }, [isStreaming, currentMidPrice, config]);
+  }, [symbol, depthLevelsCount, isStreaming]);
 
   // Combine bids & asks into a continuous Depth Chart Data structure for Recharts
   const chartData = useMemo(() => {

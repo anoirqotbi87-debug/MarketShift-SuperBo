@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, Dispatch, SetStateActi
 import { MT5AccountState, ReconnectionState, MLModelStats, ActivePosition, ClosedTrade, LogEntry } from '../types';
 import { toast } from 'sonner';
 import { useMT5WebSocket, WsSnapshot } from './useMT5WebSocket';
+import { getApiBaseUrl } from '../utils/api';
 
 interface UseMT5ConnectionOptions {
   baseDelayMs?: number;
@@ -109,9 +110,13 @@ export function useMT5Connection(
     let interval: NodeJS.Timeout;
     
     const fetchMetaApi = async () => {
-      if (riskConfig?.useLocalBridge || !riskConfig?.metaApiToken || !riskConfig?.metaApiAccountId) return;
+      console.log("[MT5] Fetching MetaApi Data. useLocalBridge:", riskConfig?.useLocalBridge);
+      if (riskConfig?.useLocalBridge || !riskConfig?.metaApiToken || !riskConfig?.metaApiAccountId) {
+          if (riskConfig?.useLocalBridge) console.log("[MT5] Skipped MetaApi: useLocalBridge is TRUE");
+          return;
+      }
       try {
-        // Step 1: Get the account region from the provisioning API
+        // Step 1: Get the account region and data from the provisioning API
         const provRes = await fetch(`https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}`, {
           headers: { 'auth-token': riskConfig.metaApiToken }
         });
@@ -123,9 +128,18 @@ export function useMT5Connection(
         }
         
         const provData = await provRes.json();
-        const region = provData.region || 'new-york'; // fallback if not present
+        const region = provData.region || 'new-york';
         
-        // Step 2: Fetch account information from the region-specific client API
+        // Step 2: Update basic account info from provisioning data immediately
+        setAccountState(prev => ({
+          ...prev,
+          broker: provData.broker || prev.broker,
+          server: provData.server || prev.server,
+          accountNumber: provData.login?.toString() || prev.accountNumber,
+          isConnected: provData.connectionStatus === 'CONNECTED'
+        }));
+
+        // Step 3: Fetch real-time account information (balance, equity) from the region-specific client API
         const res = await fetch(`https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}/account-information`, {
           headers: { 'auth-token': riskConfig.metaApiToken }
         });
@@ -169,8 +183,10 @@ export function useMT5Connection(
 
   // --- WebSocket Integration ---
   const wsUrl = React.useMemo(() => {
-    let ip = riskConfig?.localBridgeIp || `http://${window.location.hostname}:8000`;
-    return ip.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+    let ip = riskConfig?.localBridgeIp || `${getApiBaseUrl()}`;
+    let wsUrl = ip.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+    // Append the local API Key for security
+    return wsUrl + '?api_key=marketshift_dev_secret_key_2026';
   }, [riskConfig?.localBridgeIp]);
 
   const handleWsSnapshot = useCallback((data: WsSnapshot) => {
@@ -186,6 +202,8 @@ export function useMT5Connection(
         currency: data.account!.currency,
         accountNumber: data.account!.login?.toString() || prev.accountNumber,
         isConnected: data.account!.isConnected,
+        dailyPnL: data.account!.dailyPnL !== undefined ? data.account!.dailyPnL : prev.dailyPnL,
+        dailyPnLPct: data.account!.dailyPnLPct !== undefined ? data.account!.dailyPnLPct : prev.dailyPnLPct,
       }));
     }
 
@@ -199,7 +217,7 @@ export function useMT5Connection(
         currentPrice: p.currentPrice,
         stopLoss: p.stopLoss,
         takeProfit: p.takeProfit,
-        pnl: p.pnl,
+        pnl: p.profit !== undefined ? p.profit : (p.pnl || 0),
         pnlPct: p.pnlPct,
         openTime: '',
         magicNumber: p.magicNumber,
@@ -241,8 +259,8 @@ export function useMT5Connection(
 
     if (data.logs && data.logs.length > 0) {
       setLogs(prev => {
-        const mappedLogs = data.logs!.map((l: any, i) => ({
-          id: l.id ? `ws-log-${l.id}` : `ws-log-${i}-${l.timestamp}-${l.message}`,
+        const mappedLogs = data.logs!.map((l: any) => ({
+          id: l.id ? `ws-log-${l.id}` : `ws-log-${l.timestamp}-${l.message}`,
           timestamp: l.timestamp,
           level: l.level as any,
           module: l.module,
@@ -261,7 +279,7 @@ export function useMT5Connection(
     }
   }, [setAccountState, setPositions, setMlStats, setLogs]);
 
-  const { status: wsStatus, forceReconnect: wsForceReconnect } = useMT5WebSocket({
+  const { status: wsStatus, forceReconnect: wsForceReconnect, errorMsg: wsErrorMsg } = useMT5WebSocket({
     url: wsUrl,
     onSnapshot: handleWsSnapshot,
     enabled: riskConfig?.useLocalBridge === true,
@@ -277,7 +295,7 @@ export function useMT5Connection(
       if (!riskConfig?.useLocalBridge || wsStatus !== 'fallback_polling') return;
       
       try {
-        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
+        let ip = riskConfig.localBridgeIp || `${getApiBaseUrl()}`;
         // ensure format has http://
         if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
           ip = 'http://' + ip;
@@ -404,7 +422,7 @@ export function useMT5Connection(
     const fetchHistoryOnly = async () => {
       if (!riskConfig?.useLocalBridge) return;
       try {
-        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
+        let ip = riskConfig.localBridgeIp || `${getApiBaseUrl()}`;
         if (!ip.startsWith('http://') && !ip.startsWith('https://')) {
           ip = 'http://' + ip;
         }
@@ -433,7 +451,7 @@ export function useMT5Connection(
     if (!riskConfig?.useLocalBridge || !riskConfig?.localBridgeIp) return;
     const syncSettings = async () => {
       try {
-        let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
+        let ip = riskConfig.localBridgeIp || `${getApiBaseUrl()}`;
         if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
         
         const payload = {
@@ -490,31 +508,68 @@ export function useMT5Connection(
   }, [reconnectionState, setAccountState]);
 
   const executeTrade = async (symbol: string, direction: 'BUY' | 'SELL') => {
-    if (!riskConfig?.useLocalBridge) return;
     try {
-      let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
-      if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
-      
-      const res = await fetch(`${ip}/trade`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
-        },
-        body: JSON.stringify({ symbol, direction })
-      });
-      
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text);
+      if (riskConfig?.useLocalBridge) {
+        let ip = riskConfig.localBridgeIp || `${getApiBaseUrl()}`;
+        if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
+
+        const res = await fetch(`${ip}/trade`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+          },
+          body: JSON.stringify({ symbol, direction })
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text);
+        }
+
+        const data = await res.json();
+        if (onLogAdd) onLogAdd(`Trade exécuté : ${direction} ${data.volume} lots sur ${symbol} (Ticket: ${data.ticket})`, 'SUCCESS');
+        toast.success(`Trade ${direction} exécuté sur ${symbol}`, {
+          description: `${data.volume} lots - Ticket #${data.ticket}`
+        });
+        return data;
+      } else {
+        // MetaApi Execution Logic
+        if (!riskConfig?.metaApiToken || !riskConfig?.metaApiAccountId) {
+          throw new Error("MetaApi credentials missing");
+        }
+
+        // Find region first
+        const provRes = await fetch(`https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}`, {
+          headers: { 'auth-token': riskConfig.metaApiToken }
+        });
+        const provData = await provRes.json();
+        const region = provData.region || 'new-york';
+
+        const res = await fetch(`https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}/trade`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'auth-token': riskConfig.metaApiToken
+          },
+          body: JSON.stringify({
+            symbol,
+            actionType: 'ORDER_TYPE_' + direction,
+            volume: 0.01, // Default test lot
+            comment: 'MarketShift Android Mobile'
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.message || "MetaApi Trade Error");
+        }
+
+        const data = await res.json();
+        if (onLogAdd) onLogAdd(`[Cloud] Trade ${direction} envoyé sur ${symbol}`, 'SUCCESS');
+        toast.success(`Trade ${direction} envoyé (Cloud)`);
+        return data;
       }
-      
-      const data = await res.json();
-      if (onLogAdd) onLogAdd(`Trade exécuté : ${direction} ${data.volume} lots sur ${symbol} (Ticket: ${data.ticket})`, 'SUCCESS');
-      toast.success(`Trade ${direction} exécuté sur ${symbol}`, {
-        description: `${data.volume} lots - Ticket #${data.ticket}`
-      });
-      return data;
     } catch (e: any) {
       if (onLogAdd) onLogAdd(`Erreur exécution trade : ${e.message}`, 'ERROR');
       toast.error(`Échec du trade sur ${symbol}`, { description: e.message });
@@ -523,30 +578,56 @@ export function useMT5Connection(
   };
 
   const closePosition = async (ticket: number) => {
-    if (!riskConfig?.useLocalBridge) return;
     try {
-      let ip = riskConfig.localBridgeIp || `http://${window.location.hostname}:8000`;
-      if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
-      
-      const res = await fetch(`${ip}/close`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
-        },
-        body: JSON.stringify({ ticket })
-      });
-      
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text);
+      if (riskConfig?.useLocalBridge) {
+        let ip = riskConfig.localBridgeIp || `${getApiBaseUrl()}`;
+        if (!ip.startsWith('http://') && !ip.startsWith('https://')) ip = 'http://' + ip;
+
+        const res = await fetch(`${ip}/close`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+          },
+          body: JSON.stringify({ ticket })
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text);
+        }
+
+        if (onLogAdd) onLogAdd(`Position #${ticket} clôturée avec succès.`, 'SUCCESS');
+        toast.success(`Position #${ticket} clôturée`, {
+          description: 'La position a été fermée avec succès sur MT5.'
+        });
+        return await res.json();
+      } else {
+        // MetaApi Close Logic
+        const provRes = await fetch(`https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}`, {
+          headers: { 'auth-token': riskConfig.metaApiToken }
+        });
+        const provData = await provRes.json();
+        const region = provData.region || 'new-york';
+
+        const res = await fetch(`https://mt-client-api-v1.${region}.agiliumtrade.ai/users/current/accounts/${riskConfig.metaApiAccountId}/trade`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'auth-token': riskConfig.metaApiToken
+          },
+          body: JSON.stringify({
+            actionType: 'POSITION_CLOSE_ID',
+            positionId: ticket.toString()
+          })
+        });
+
+        if (!res.ok) throw new Error("MetaApi Close Error");
+
+        if (onLogAdd) onLogAdd(`[Cloud] Position #${ticket} fermée.`, 'SUCCESS');
+        toast.success(`Position #${ticket} fermée (Cloud)`);
+        return await res.json();
       }
-      
-      if (onLogAdd) onLogAdd(`Position #${ticket} clôturée avec succès.`, 'SUCCESS');
-      toast.success(`Position #${ticket} clôturée`, {
-        description: 'La position a été fermée avec succès sur MT5.'
-      });
-      return await res.json();
     } catch (e: any) {
       if (onLogAdd) onLogAdd(`Erreur clôture position : ${e.message}`, 'ERROR');
       toast.error(`Échec de la clôture de la position #${ticket}`, { description: e.message });
@@ -560,6 +641,7 @@ export function useMT5Connection(
     simulateDisconnect,
     executeTrade,
     closePosition,
-    wsStatus
+    wsStatus,
+    wsErrorMsg
   };
 }
