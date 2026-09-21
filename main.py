@@ -1,4 +1,27 @@
+import sys
+import threading
+import multiprocessing
+import uvicorn
 import logging
+import asyncio
+from datetime import datetime
+
+# Force UTF-8 encoding for Windows terminals to prevent emoji crashes
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass
+
+logging.basicConfig(
+    level=logging.DEBUG, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    force=True,
+    handlers=[
+        logging.FileHandler("marketshift.log", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 import uvicorn
 
 from fastapi import FastAPI
@@ -12,10 +35,10 @@ from infrastructure import models
 # Création des tables de la base de données
 Base.metadata.create_all(bind=engine)
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# La configuration de logging a été déplacée au début du fichier.
 
 def main():
-    logging.info(f"=== Démarrage MarketShift SuperBot ({Config.ENVIRONMENT}) ===")
+    logging.info(f"=== Démarrage MarketShift SuperBot V2.0 ({Config.ENVIRONMENT}) ===")
     
     # Connecteur Primaire (XM)
     try:
@@ -58,7 +81,9 @@ def main():
     print("Step 6: Uvicorn"); sys.stdout.flush()
     # Démarrage serveur API (Bloquant)
     logging.info("Démarrage du serveur API sur http://0.0.0.0:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="error")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

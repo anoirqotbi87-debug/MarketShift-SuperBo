@@ -36,7 +36,8 @@ class PositionSizer:
         logging.info("[PositionSizer] Initialisé avec Kelly Fractionnaire (25%)")
         
         if self.db:
-            self._load_from_db()
+            # self._load_from_db() # Désactivé pour éviter de mélanger les comptes. L'Engine injectera l'historique MT5 réel au démarrage.
+            pass
 
     def _load_from_db(self):
         try:
@@ -107,7 +108,9 @@ class PositionSizer:
         raw_kelly = max(0.0, raw_kelly)  # Ne jamais être négatif
 
         fractional_kelly = raw_kelly * self.KELLY_FRACTION
-        capped_kelly = min(fractional_kelly, self.MAX_RISK_PCT)
+        
+        # --- NOUVEAU: Plancher de 1% pour forcer le trading actif ---
+        capped_kelly = min(max(fractional_kelly, 0.01), self.MAX_RISK_PCT)
 
         logging.info(
             f"[PositionSizer] Kelly brut={raw_kelly:.3f} | "
@@ -121,7 +124,10 @@ class PositionSizer:
         signal: Signal,
         account: AccountInfo,
         pip_value: float = 10.0,
-        sl_pips: Optional[float] = None
+        sl_pips: Optional[float] = None,
+        min_vol: float = 0.01,
+        max_vol: float = 100.0,
+        vol_step: float = 0.01
     ) -> float:
         """
         Calcule le volume de lots à trader.
@@ -133,12 +139,14 @@ class PositionSizer:
             sl_pips: Stop Loss en pips (issu du calcul ATR). Si None, utilise un SL fixe de 20 pips.
 
         Returns:
-            float: Le volume en lots (arrondi à 2 décimales, minimum 0.01)
+            float: Le volume en lots
         """
-        from decimal import Decimal, ROUND_HALF_DOWN
+        from decimal import Decimal, ROUND_DOWN
         
         kelly_pct = Decimal(str(self.compute_kelly_fraction()))
-        balance = Decimal(str(account.balance))
+        # Si la balance renvoyée par le courtier est 0.0, on utilise l'équité
+        base_capital = account.balance if account.balance > 0 else account.equity
+        balance = Decimal(str(base_capital))
         capital_at_risk = balance * kelly_pct
 
         effective_sl_pips = Decimal(str(sl_pips if sl_pips and sl_pips > 0 else 20.0))
@@ -148,11 +156,25 @@ class PositionSizer:
         if d_pip_value > Decimal('0') and effective_sl_pips > Decimal('0'):
             raw_volume = capital_at_risk / (effective_sl_pips * d_pip_value)
         else:
-            raw_volume = Decimal(str(self.MIN_VOLUME))
+            raw_volume = Decimal(str(min_vol))
 
-        # Arrondir à 2 décimales et appliquer les limites
-        min_vol = Decimal(str(self.MIN_VOLUME))
-        volume = max(min_vol, raw_volume).quantize(Decimal('.01'), rounding=ROUND_HALF_DOWN)
+        # Arrondir selon vol_step
+        step_d = Decimal(str(vol_step))
+        if step_d > Decimal('0'):
+            volume = (raw_volume / step_d).quantize(Decimal('1'), rounding=ROUND_DOWN) * step_d
+        else:
+            volume = raw_volume
+
+        # Clamping (min_vol <= volume <= max_vol)
+        d_min = Decimal(str(min_vol))
+        d_max = Decimal(str(max_vol))
+        
+        # --- NOUVEAU: Bridage spécifique pour GOLDmicro ---
+        if "GOLD" in signal.symbol.upper():
+            d_max = min(d_max, Decimal('0.10'))
+            
+        volume = max(d_min, min(d_max, volume))
+        
         volume = float(volume)  # Conversion finale pour MT5 qui attend un float
 
         logging.info(

@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { downloadCSV } from '../../utils/csvExport';
+import { getApiBaseUrl } from '../../utils/api';
 
 interface BacktestTrade {
   id: number;
@@ -131,7 +132,7 @@ export const BacktesterTab: React.FC = () => {
       formData.append('symbol', symbol);
       formData.append('initial_capital', initialCapital.toString());
 
-      const res = await fetch(`http://${window.location.hostname}:8000/backtest`, {
+      const res = await fetch(`${getApiBaseUrl()}/backtest`, {
         method: 'POST',
         body: formData,
       });

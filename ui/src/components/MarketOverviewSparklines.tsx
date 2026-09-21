@@ -3,6 +3,7 @@ import { ResponsiveContainer, AreaChart, Area, YAxis, Tooltip } from 'recharts';
 import { 
   TrendingUp, TrendingDown, Activity, Globe, RefreshCw, BarChart2, Zap, ArrowUpRight, ArrowDownRight, Flame
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 
 export interface SymbolSparklineData {
   symbol: string;
@@ -20,237 +21,33 @@ export interface SymbolSparklineData {
   history7d: { time: string; price: number }[];
 }
 
-const INITIAL_SYMBOLS: SymbolSparklineData[] = [
-  {
-    symbol: 'EURUSD',
-    name: 'Euro / US Dollar',
-    category: 'Forex',
-    currentPrice: 1.08452,
-    change24hUsd: 0.00345,
-    change24hPct: 0.32,
-    high24h: 1.08620,
-    low24h: 1.08010,
-    spreadPips: 0.8,
-    digits: 5,
-    history1h: [
-      { time: '18:00', price: 1.08380 },
-      { time: '18:15', price: 1.08410 },
-      { time: '18:30', price: 1.08390 },
-      { time: '18:45', price: 1.08435 },
-      { time: '19:00', price: 1.08452 },
-    ],
-    history24h: [
-      { time: '00:00', price: 1.08107 },
-      { time: '04:00', price: 1.08050 },
-      { time: '08:00', price: 1.08220 },
-      { time: '12:00', price: 1.08540 },
-      { time: '16:00', price: 1.08410 },
-      { time: '20:00', price: 1.08452 },
-    ],
-    history7d: [
-      { time: 'J-6', price: 1.07600 },
-      { time: 'J-5', price: 1.07920 },
-      { time: 'J-4', price: 1.08150 },
-      { time: 'J-3', price: 1.08020 },
-      { time: 'J-2', price: 1.08310 },
-      { time: 'J-1', price: 1.08280 },
-      { time: 'Auj', price: 1.08452 },
-    ],
-  },
-  {
-    symbol: 'XAUUSD',
-    name: 'Gold / US Dollar',
-    category: 'Commodities',
-    currentPrice: 2685.40,
-    change24hUsd: 30.50,
-    change24hPct: 1.15,
-    high24h: 2692.10,
-    low24h: 2651.80,
-    spreadPips: 1.2,
-    digits: 2,
-    history1h: [
-      { time: '18:00', price: 2678.10 },
-      { time: '18:15', price: 2680.50 },
-      { time: '18:30', price: 2682.00 },
-      { time: '18:45', price: 2684.10 },
-      { time: '19:00', price: 2685.40 },
-    ],
-    history24h: [
-      { time: '00:00', price: 2654.90 },
-      { time: '04:00', price: 2652.10 },
-      { time: '08:00', price: 2668.00 },
-      { time: '12:00', price: 2688.50 },
-      { time: '16:00', price: 2682.30 },
-      { time: '20:00', price: 2685.40 },
-    ],
-    history7d: [
-      { time: 'J-6', price: 2620.00 },
-      { time: 'J-5', price: 2635.50 },
-      { time: 'J-4', price: 2640.20 },
-      { time: 'J-3', price: 2658.00 },
-      { time: 'J-2', price: 2671.00 },
-      { time: 'J-1', price: 2669.80 },
-      { time: 'Auj', price: 2685.40 },
-    ],
-  },
-  {
-    symbol: 'BTCUSD',
-    name: 'Bitcoin / US Dollar',
-    category: 'Crypto',
-    currentPrice: 96420.00,
-    change24hUsd: -826.50,
-    change24hPct: -0.85,
-    high24h: 97850.00,
-    low24h: 95300.00,
-    spreadPips: 12.0,
-    digits: 2,
-    history1h: [
-      { time: '18:00', price: 96800.00 },
-      { time: '18:15', price: 96650.00 },
-      { time: '18:30', price: 96500.00 },
-      { time: '18:45', price: 96380.00 },
-      { time: '19:00', price: 96420.00 },
-    ],
-    history24h: [
-      { time: '00:00', price: 97246.50 },
-      { time: '04:00', price: 97800.00 },
-      { time: '08:00', price: 96900.00 },
-      { time: '12:00', price: 95800.00 },
-      { time: '16:00', price: 96150.00 },
-      { time: '20:00', price: 96420.00 },
-    ],
-    history7d: [
-      { time: 'J-6', price: 92100.00 },
-      { time: 'J-5', price: 94300.00 },
-      { time: 'J-4', price: 95800.00 },
-      { time: 'J-3', price: 98200.00 },
-      { time: 'J-2', price: 97100.00 },
-      { time: 'J-1', price: 97246.00 },
-      { time: 'Auj', price: 96420.00 },
-    ],
-  },
-  {
-    symbol: 'USDJPY',
-    name: 'US Dollar / Japanese Yen',
-    category: 'Forex',
-    currentPrice: 154.205,
-    change24hUsd: 0.691,
-    change24hPct: 0.45,
-    high24h: 154.600,
-    low24h: 153.400,
-    spreadPips: 0.9,
-    digits: 3,
-    history1h: [
-      { time: '18:00', price: 154.050 },
-      { time: '18:15', price: 154.120 },
-      { time: '18:30', price: 154.180 },
-      { time: '18:45', price: 154.195 },
-      { time: '19:00', price: 154.205 },
-    ],
-    history24h: [
-      { time: '00:00', price: 153.514 },
-      { time: '04:00', price: 153.600 },
-      { time: '08:00', price: 153.950 },
-      { time: '12:00', price: 154.450 },
-      { time: '16:00', price: 154.100 },
-      { time: '20:00', price: 154.205 },
-    ],
-    history7d: [
-      { time: 'J-6', price: 151.800 },
-      { time: 'J-5', price: 152.400 },
-      { time: 'J-4', price: 153.100 },
-      { time: 'J-3', price: 152.900 },
-      { time: 'J-2', price: 153.800 },
-      { time: 'J-1', price: 153.510 },
-      { time: 'Auj', price: 154.205 },
-    ],
-  },
-  {
-    symbol: 'GBPUSD',
-    name: 'British Pound / US Dollar',
-    category: 'Forex',
-    currentPrice: 1.26804,
-    change24hUsd: -0.00228,
-    change24hPct: -0.18,
-    high24h: 1.27150,
-    low24h: 1.26520,
-    spreadPips: 1.0,
-    digits: 5,
-    history1h: [
-      { time: '18:00', price: 1.26850 },
-      { time: '18:15', price: 1.26830 },
-      { time: '18:30', price: 1.26790 },
-      { time: '18:45', price: 1.26810 },
-      { time: '19:00', price: 1.26804 },
-    ],
-    history24h: [
-      { time: '00:00', price: 1.27032 },
-      { time: '04:00', price: 1.27120 },
-      { time: '08:00', price: 1.26900 },
-      { time: '12:00', price: 1.26600 },
-      { time: '16:00', price: 1.26780 },
-      { time: '20:00', price: 1.26804 },
-    ],
-    history7d: [
-      { time: 'J-6', price: 1.25900 },
-      { time: 'J-5', price: 1.26200 },
-      { time: 'J-4', price: 1.26700 },
-      { time: 'J-3', price: 1.27200 },
-      { time: 'J-2', price: 1.27050 },
-      { time: 'J-1', price: 1.27030 },
-      { time: 'Auj', price: 1.26804 },
-    ],
-  }
-];
-
 interface MarketOverviewSparklinesProps {
   onSymbolClick?: (symbol: string) => void;
 }
 
 export const MarketOverviewSparklines: React.FC<MarketOverviewSparklinesProps> = ({ onSymbolClick }) => {
   const [timeframe, setTimeframe] = useState<'1H' | '24H' | '7D'>('24H');
-  const [symbols, setSymbols] = useState<SymbolSparklineData[]>(INITIAL_SYMBOLS);
+  const [symbols, setSymbols] = useState<SymbolSparklineData[]>([]);
   const [lastTickSymbol, setLastTickSymbol] = useState<string | null>(null);
 
-  // Live micro-tick simulator to make sparklines feel real and dynamic
   useEffect(() => {
-    const interval = setInterval(() => {
-      setSymbols(prev => {
-        const randomIndex = Math.floor(Math.random() * prev.length);
-        const item = prev[randomIndex];
-        setLastTickSymbol(item.symbol);
-
-        const deltaPct = (Math.random() - 0.49) * 0.001; // subtle noise
-        const newPrice = Math.max(0.0001, item.currentPrice * (1 + deltaPct));
-        const priceDiff = newPrice - (item.currentPrice - item.change24hUsd);
-        const newChangePct = ((newPrice - (item.currentPrice - item.change24hUsd)) / (item.currentPrice - item.change24hUsd)) * 100;
-
-        const updatedHistory24h = [...item.history24h];
-        if (updatedHistory24h.length > 0) {
-          updatedHistory24h[updatedHistory24h.length - 1] = {
-            ...updatedHistory24h[updatedHistory24h.length - 1],
-            price: newPrice
-          };
+    const fetchMarketOverview = async () => {
+      try {
+        const url = `${getApiBaseUrl()}/market-overview`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setSymbols(data);
+          // Highlight the first symbol to simulate a tick occasionally
+          setLastTickSymbol(data.length > 0 ? data[Math.floor(Math.random() * data.length)].symbol : null);
+          setTimeout(() => setLastTickSymbol(null), 800);
         }
-
-        return prev.map((s, idx) => {
-          if (idx !== randomIndex) return s;
-          return {
-            ...s,
-            currentPrice: newPrice,
-            change24hUsd: priceDiff,
-            change24hPct: newChangePct,
-            high24h: Math.max(s.high24h, newPrice),
-            low24h: Math.min(s.low24h, newPrice),
-            history24h: updatedHistory24h
-          };
-        });
-      });
-
-      // Reset highlight flash after 800ms
-      setTimeout(() => setLastTickSymbol(null), 800);
-    }, 2500);
-
+      } catch (err) {
+        console.error("Erreur fetch market overview:", err);
+      }
+    };
+    fetchMarketOverview();
+    const interval = setInterval(fetchMarketOverview, 10000); // 10 secondes refresh reel
     return () => clearInterval(interval);
   }, []);
 

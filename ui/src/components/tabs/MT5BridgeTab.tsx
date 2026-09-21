@@ -108,58 +108,59 @@ export const MT5BridgeTab: React.FC<MT5BridgeTabProps> = ({ accountState }) => {
         </p>
 
         {areCredentialsUnlocked ? (
-          <div className="space-y-2.5 font-mono text-xs pt-1 border-t border-slate-800/80 animate-fadeIn">
+          <div className="space-y-4 font-mono text-sm pt-3 border-t border-slate-800/80 animate-fadeIn">
             <div>
-              <label className="text-[10px] text-slate-400 font-sans">Serveur Courtier MT5 :</label>
+              <label className="text-xs text-slate-400 font-sans block mb-1">Serveur Courtier MT5 :</label>
               <input
                 type="text"
                 value={mt5Server}
                 onChange={(e) => setMt5Server(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-indigo-300 font-bold mt-0.5 outline-none focus:border-indigo-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-indigo-300 font-bold outline-none focus:border-indigo-500 transition-colors"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="text-[10px] text-slate-400 font-sans">Compte / Login ID :</label>
+                <label className="text-xs text-slate-400 font-sans block mb-1">Compte / Login ID :</label>
                 <input
                   type="text"
                   value={mt5Login}
                   onChange={(e) => setMt5Login(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-white font-bold mt-0.5 outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white font-bold outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="text-[10px] text-slate-400 font-sans">Mot de Passe Master :</label>
+                <label className="text-xs text-slate-400 font-sans block mb-1">Mot de Passe Master :</label>
                 <input
                   type="text"
                   value={mt5Pass}
                   onChange={(e) => setMt5Pass(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-emerald-400 font-bold mt-0.5 outline-none focus:border-indigo-500"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-emerald-400 font-bold outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-400 font-sans">Clé de Chiffrement ZeroMQ Socket :</label>
+              <label className="text-xs text-slate-400 font-sans block mb-1">Clé de Chiffrement ZeroMQ Socket :</label>
               <input
                 type="text"
                 value={zmqKey}
                 onChange={(e) => setZmqKey(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-slate-300 font-bold mt-0.5 outline-none focus:border-indigo-500"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-300 font-bold outline-none focus:border-indigo-500 transition-colors"
               />
             </div>
 
-            <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1.5 pt-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
+            <div className="text-xs text-emerald-400 font-mono flex items-center gap-2 pt-2 bg-emerald-950/20 p-3 rounded-xl border border-emerald-900/30">
+              <ShieldCheck className="w-4 h-4 flex-shrink-0" />
               <span>Modifications enregistrées automatiquement dans le stockage matériel Android / Web Crypto.</span>
             </div>
           </div>
         ) : (
-          <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-center font-mono text-xs text-slate-500 flex items-center justify-center gap-2">
-            <Lock className="w-4 h-4 text-indigo-400" />
-            <span>Identifiants Masqués • Cliquez sur "Déverrouiller via Biométrie"</span>
+          <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 text-center font-mono text-sm text-slate-500 flex flex-col items-center justify-center gap-2">
+            <Lock className="w-6 h-6 text-indigo-400 mb-1" />
+            <span>Identifiants Masqués & Sécurisés</span>
+            <span className="text-xs text-slate-600">Cliquez sur "Déverrouiller via Biométrie" pour modifier</span>
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MT5AccountState } from '../types';
 import { 
   ResponsiveContainer, 
@@ -12,6 +12,7 @@ import {
   ReferenceLine 
 } from 'recharts';
 import { Activity, TrendingUp, TrendingDown, Calendar, Layers, DollarSign } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 
 interface PnLEquityChartProps {
   accountState: MT5AccountState;
@@ -24,42 +25,33 @@ export interface PnLDataPoint {
   balance: number;
 }
 
-// Historical time-series data for different timeframes
-const timeframesData: Record<'1D' | '1W' | '1M', PnLDataPoint[]> = {
-  '1D': [
-    { time: '08:00', equity: 10000, dailyPnL: 0, balance: 10000 },
-    { time: '09:30', equity: 10085, dailyPnL: 85, balance: 10000 },
-    { time: '11:00', equity: 10160, dailyPnL: 160, balance: 10120 },
-    { time: '12:30', equity: 10110, dailyPnL: 110, balance: 10120 },
-    { time: '14:00', equity: 10245, dailyPnL: 245, balance: 10210 },
-    { time: '15:30', equity: 10320, dailyPnL: 320, balance: 10210 },
-    { time: '17:00', equity: 10450, dailyPnL: 450, balance: 10390 },
-  ],
-  '1W': [
-    { time: 'Lun', equity: 9800, dailyPnL: -200, balance: 9800 },
-    { time: 'Mar', equity: 9950, dailyPnL: 150, balance: 9800 },
-    { time: 'Mer', equity: 10120, dailyPnL: 170, balance: 10100 },
-    { time: 'Jeu', equity: 10280, dailyPnL: 160, balance: 10250 },
-    { time: 'Ven', equity: 10450, dailyPnL: 170, balance: 10390 },
-  ],
-  '1M': [
-    { time: 'Sem 1', equity: 9200, dailyPnL: -800, balance: 9200 },
-    { time: 'Sem 2', equity: 9650, dailyPnL: 450, balance: 9600 },
-    { time: 'Sem 3', equity: 10050, dailyPnL: 400, balance: 10000 },
-    { time: 'Sem 4', equity: 10450, dailyPnL: 400, balance: 10390 },
-  ]
-};
-
 export const PnLEquityChart: React.FC<PnLEquityChartProps> = ({ accountState }) => {
   const [timeframe, setTimeframe] = useState<'1D' | '1W' | '1M'>('1D');
   const [metricMode, setMetricMode] = useState<'both' | 'equity' | 'pnl'>('both');
+  const [rawData, setRawData] = useState<PnLDataPoint[]>([]);
 
-  // Dynamic calculation based on current accountState
-  const currentRawData = timeframesData[timeframe];
+  useEffect(() => {
+    const fetchEquityCurve = async () => {
+      try {
+        const url = `${getApiBaseUrl()}/equity-curve?timeframe=${timeframe}`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          setRawData(data);
+        }
+      } catch (err) {
+        console.error("Erreur fetch equity curve:", err);
+      }
+    };
+    fetchEquityCurve();
+    // Rafraîchir toutes les 5 minutes
+    const interval = setInterval(fetchEquityCurve, 300000);
+    return () => clearInterval(interval);
+  }, [timeframe]);
   
   // Overwrite latest point with actual realtime state
-  const chartData = currentRawData.map((pt, idx) => {
-    if (idx === currentRawData.length - 1) {
+  const chartData = rawData.length > 0 ? rawData.map((pt, idx) => {
+    if (idx === rawData.length - 1) {
       return {
         ...pt,
         equity: accountState.equity,
@@ -68,7 +60,7 @@ export const PnLEquityChart: React.FC<PnLEquityChartProps> = ({ accountState }) 
       };
     }
     return pt;
-  });
+  }) : [];
 
   const isProfit = accountState.dailyPnL >= 0;
 

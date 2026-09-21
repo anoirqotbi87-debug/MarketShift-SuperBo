@@ -1,6 +1,13 @@
 import logging
+import threading
 from typing import Optional, List, Dict, Any
 from core.interfaces import IBrokerConnector, AccountInfo, PositionInfo, OrderType
+
+try:
+    from infrastructure.telegram_notifier import TelegramNotifier, telegram_notifier
+except ImportError:
+    TelegramNotifier = None  # type: ignore
+    telegram_notifier = None  # type: ignore
 
 class BrokerRouter(IBrokerConnector):
     """
@@ -8,11 +15,13 @@ class BrokerRouter(IBrokerConnector):
     Encapsule deux connexions (Primary et Fallback) et route les opérations 
     automatiquement vers le fallback si le primaire défaille.
     """
-    def __init__(self, primary: IBrokerConnector, fallback: IBrokerConnector):
+    def __init__(self, primary: IBrokerConnector, fallback: IBrokerConnector, notifier: Optional[Any] = None):
         self.primary = primary
         self.fallback = fallback
+        self.notifier = notifier if notifier is not None else telegram_notifier
         self._active_broker = self.primary
         self.connected = False
+        self._lock = threading.Lock()
 
     def connect(self) -> bool:
         primary_ok = self.primary.connect()
@@ -30,10 +39,28 @@ class BrokerRouter(IBrokerConnector):
             self._active_broker = self.fallback
             self.connected = True
             logging.info("[Router] ✅ Connecté au courtier FALLBACK avec succès.")
+            if self.notifier:
+                try:
+                    self.notifier.notify_critical_event(
+                        "BROKER_FAILOVER",
+                        reason="Primary broker unreachable during connect",
+                        details="Switched to fallback broker successfully"
+                    )
+                except Exception as e:
+                    logging.error(f"[Router] Erreur notification failover: {e}")
             return True
             
         logging.error("[Router] ❌ Échec critique : Primaire et Fallback injoignables.")
         self.connected = False
+        if self.notifier:
+            try:
+                self.notifier.notify_critical_event(
+                    "MT5_DISCONNECT",
+                    reason="Primaire et Fallback injoignables (Primary and fallback brokers unreachable)",
+                    details="Both primary and fallback MT5 connections failed during connect()"
+                )
+            except Exception as e:
+                logging.error(f"[Router] Erreur notification deconnexion: {e}")
         return False
 
     def disconnect(self) -> None:
@@ -44,15 +71,37 @@ class BrokerRouter(IBrokerConnector):
 
     def _switch_to_fallback(self) -> bool:
         """Tente de basculer sur le courtier de secours."""
-        logging.warning("[Router] 🔄 Tentative de bascule (Failover) vers le courtier Fallback...")
-        if not getattr(self.fallback, 'connected', False):
-            if not self.fallback.connect():
-                logging.error("[Router] ❌ Échec du Failover : Fallback injoignable.")
-                return False
-                
-        self._active_broker = self.fallback
-        logging.info("[Router] ✅ Failover réussi. Trafic routé vers le Fallback.")
-        return True
+        with self._lock:
+            if self._active_broker == self.fallback and getattr(self.fallback, 'connected', False):
+                return True
+
+            logging.warning("[Router] 🔄 Tentative de bascule (Failover) vers le courtier Fallback...")
+            if not getattr(self.fallback, 'connected', False):
+                if not self.fallback.connect():
+                    logging.error("[Router] ❌ Échec du Failover : Fallback injoignable.")
+                    if self.notifier:
+                        try:
+                            self.notifier.notify_critical_event(
+                                "MT5_DISCONNECT",
+                                reason="Failover failed: Fallback broker unreachable (Fallback injoignable)",
+                                details="Primary broker failed and fallback connection attempt failed"
+                            )
+                        except Exception as e:
+                            logging.error(f"[Router] Erreur notification echec failover: {e}")
+                    return False
+                    
+            self._active_broker = self.fallback
+            logging.info("[Router] ✅ Failover réussi. Trafic routé vers le Fallback.")
+            if self.notifier:
+                try:
+                    self.notifier.notify_critical_event(
+                        "BROKER_FAILOVER",
+                        reason="Primary broker failure during operation",
+                        details="Active broker switched from primary to fallback"
+                    )
+                except Exception as e:
+                    logging.error(f"[Router] Erreur notification failover: {e}")
+            return True
 
     def get_account_info(self) -> Optional[AccountInfo]:
         info = self._active_broker.get_account_info()
@@ -97,3 +146,17 @@ class BrokerRouter(IBrokerConnector):
             if self._switch_to_fallback():
                 return self._active_broker.get_historical_data(symbol, timeframe, num_candles)
         return data
+
+    def get_symbol_info(self, symbol: str) -> Optional[Any]:
+        info = self._active_broker.get_symbol_info(symbol)
+        if info is None and self._active_broker == self.primary:
+            if self._switch_to_fallback():
+                return self._active_broker.get_symbol_info(symbol)
+        return info
+
+    def get_history_deals(self, from_date: Any, to_date: Any) -> Optional[Any]:
+        deals = self._active_broker.get_history_deals(from_date, to_date)
+        if deals is None and self._active_broker == self.primary:
+            if self._switch_to_fallback():
+                return self._active_broker.get_history_deals(from_date, to_date)
+        return deals

@@ -29,6 +29,7 @@ import { BiometricAuthModal } from '../BiometricAuthModal';
 import { exportTradesToCSV, exportFullReportToCSV } from '../../utils/csvExport';
 import { TradingViewWidget } from '../TradingViewWidget';
 import { CollapsibleSection } from '../CollapsibleSection';
+import { getApiBaseUrl } from '../../utils/api';
 
 // Date parser helper for trades with time strings or date strings
 function parseTradeDate(timeStr: string | number): Date {
@@ -41,6 +42,15 @@ function parseTradeDate(timeStr: string | number): Date {
   }
 
   const trimmed = String(timeStr).trim();
+
+  // Parseur spécial pour format "JJ/MM HH:MM" ou "JJ/MM/AAAA HH:MM" (ex: "17/07 03:59")
+  const dateMatch = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\s+(\d{1,2}):(\d{1,2})/);
+  if (dateMatch) {
+    const [_, day, month, year, hour, min] = dateMatch;
+    const y = year ? (year.length === 2 ? 2000 + parseInt(year, 10) : parseInt(year, 10)) : new Date().getFullYear();
+    return new Date(y, parseInt(month, 10) - 1, parseInt(day, 10), parseInt(hour, 10), parseInt(min, 10));
+  }
+
   if (trimmed.includes('-') || trimmed.includes('/')) {
     const formatted = trimmed.replace(' ', 'T');
     const parsed = new Date(formatted);
@@ -224,6 +234,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
       }
 
       return true;
+    }).sort((a, b) => {
+      const dateA = parseTradeDate(a.closeTime || a.openTime).getTime();
+      const dateB = parseTradeDate(b.closeTime || b.openTime).getTime();
+      return dateB - dateA; // Plus récent en premier
     });
   }, [closedTrades, closedTagFilter, searchQuery, datePreset, startDate, endDate]);
 
@@ -237,7 +251,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return { count, totalPnL, winningCount, winRate };
   }, [filteredClosedTrades]);
   return (
-    <div className="space-y-4 text-slate-100">
+    <div className="space-y-4 text-slate-100 pb-24">
       
       {/* Circuit Breaker Alert Banner if triggered */}
       {riskConfig.circuitBreakerActive && (
@@ -388,10 +402,10 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             defaultExpanded={true}
           >
             <div className="space-y-4">
-              <MultiSymbolPanel positions={positions} isConnected={accountState.isConnected} localBridgeIp={`http://${window.location.hostname}:8000`} />
+              <MultiSymbolPanel positions={positions} isConnected={accountState.isConnected} localBridgeIp={`${getApiBaseUrl()}`} />
               <KellyPositionSizer 
                 isConnected={accountState.isConnected} 
-                localBridgeIp={`http://${window.location.hostname}:8000`} 
+                localBridgeIp={`${getApiBaseUrl()}`} 
                 maxRiskPct={riskConfig.maxRiskPerTradePct}
               />
             </div>

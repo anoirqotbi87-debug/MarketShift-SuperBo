@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
-import { Play, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Play, TrendingUp, AlertTriangle, Save, CheckCircle2 } from 'lucide-react';
+import { getApiBaseUrl } from '../../utils/api';
 
 export const OptimizerTab: React.FC = () => {
   const [symbol, setSymbol] = useState<string>('EURUSD');
@@ -10,8 +11,35 @@ export const OptimizerTab: React.FC = () => {
 
   const downloadHistory = () => {
     // Determine a reasonable timeframe (we use M15 by default for grid search)
-    const url = `http://${window.location.hostname}:8000/export-history?symbol=${symbol}&timeframe=M15&num_bars=50000`;
+    const url = `${getApiBaseUrl()}/export-history?symbol=${symbol}&timeframe=M15&num_bars=50000`;
     window.open(url, '_blank');
+  };
+
+  const [applySuccess, setApplySuccess] = useState<boolean>(false);
+
+  const applyOptimalSettings = async () => {
+    if (!result || !result.bestParams) return;
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/apply-optimal-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slMult: result.bestParams.slMult,
+          confThreshold: result.bestParams.confThreshold,
+          symbol: result.symbol || symbol
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setApplySuccess(true);
+        setTimeout(() => setApplySuccess(false), 3000);
+      } else {
+        alert("Erreur lors de l'application: " + data.message);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erreur de connexion avec le serveur.");
+    }
   };
 
   const runOptimizer = async () => {
@@ -21,15 +49,16 @@ export const OptimizerTab: React.FC = () => {
     }
 
     setIsLoading(true);
+    setResult(null);
+    setApplySuccess(false);
     
     try {
-      const file = fileInputRef.current.files[0];
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', fileInputRef.current.files[0]);
       formData.append('symbol', symbol);
       formData.append('initial_capital', initialCapital.toString());
 
-      const res = await fetch(`http://${window.location.hostname}:8000/optimize`, {
+      const res = await fetch(`${getApiBaseUrl()}/optimize`, {
         method: 'POST',
         body: formData,
       });
@@ -42,11 +71,35 @@ export const OptimizerTab: React.FC = () => {
         return;
       }
 
-      setResult(data);
+      // If async job returned
+      if (data.job_id) {
+        const jobId = data.job_id;
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`${getApiBaseUrl()}/optimize/status/${jobId}`);
+            const statusData = await statusRes.json();
+            
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval);
+              setResult(statusData.result);
+              setIsLoading(false);
+            } else if (statusData.status === 'error') {
+              clearInterval(pollInterval);
+              alert(`Erreur Optimizer: ${statusData.error}`);
+              setIsLoading(false);
+            }
+          } catch (e) {
+            console.error("Polling error", e);
+          }
+        }, 2000); // Check every 2 seconds
+      } else {
+        // Fallback for synchronous backend
+        setResult(data);
+        setIsLoading(false);
+      }
     } catch (err) {
       console.error("Optimizer Error:", err);
       alert("Impossible de contacter le serveur Python FastAPI.");
-    } finally {
       setIsLoading(false);
     }
   };
@@ -133,19 +186,42 @@ export const OptimizerTab: React.FC = () => {
           {result ? (
             <>
               <div className="bg-slate-800/50 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
-                <div className="flex items-center space-x-3 mb-6">
-                  <TrendingUp className="w-6 h-6 text-emerald-400" />
-                  <h3 className="text-xl font-bold text-white">Meilleurs Paramètres Trouvés</h3>
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-3">
+                    <TrendingUp className="w-6 h-6 text-emerald-400" />
+                    <h3 className="text-xl font-bold text-white">Meilleurs Paramètres Trouvés</h3>
+                  </div>
+                  
+                  <button
+                    onClick={applyOptimalSettings}
+                    className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-lg ${
+                      applySuccess 
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50' 
+                        : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/50'
+                    }`}
+                  >
+                    {applySuccess ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Paramètres appliqués !</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Appliquer au Bot en direct</span>
+                      </>
+                    )}
+                  </button>
                 </div>
                 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                   <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5">
-                    <p className="text-sm text-slate-400">Stop Loss Optimal</p>
-                    <p className="text-2xl font-bold text-white">{result.bestParams.sl} pips</p>
+                    <p className="text-sm text-slate-400">SL Multiplier Optimal</p>
+                    <p className="text-2xl font-bold text-white">{result.bestParams.slMult} x ATR</p>
                   </div>
                   <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5">
-                    <p className="text-sm text-slate-400">Take Profit Optimal</p>
-                    <p className="text-2xl font-bold text-white">{result.bestParams.tp} pips</p>
+                    <p className="text-sm text-slate-400">ML Conf. Optimal</p>
+                    <p className="text-2xl font-bold text-white">{result.bestParams.confThreshold.toFixed(0)}%</p>
                   </div>
                   <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5">
                     <p className="text-sm text-slate-400">Max Sharpe Ratio</p>
@@ -157,22 +233,22 @@ export const OptimizerTab: React.FC = () => {
                   </div>
                 </div>
                 
-                <h4 className="text-md font-semibold text-white mb-3 mt-8">Matrice de Sensibilité Heatmap (SL vs TP)</h4>
+                <h4 className="text-md font-semibold text-white mb-3 mt-8">Matrice de Sensibilité Heatmap (SL vs ML Conf)</h4>
                 <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5 mb-8">
                   <div className="flex flex-col gap-1">
                     <div className="flex text-xs text-slate-500 mb-2">
                       <div className="w-16"></div>
                       <div className="flex-1 flex justify-between px-2">
-                        <span>Take Profit (pips) →</span>
+                        <span>ML Confidence Threshold →</span>
                       </div>
                     </div>
                     
-                    {Array.from(new Set(result.gridResults.map((r: any) => r.sl))).sort((a: any, b: any) => Number(a) - Number(b)).map((sl: any) => (
+                    {Array.from(new Set(result.gridResults.map((r: any) => r.slMult))).sort((a: any, b: any) => Number(a) - Number(b)).map((sl: any) => (
                       <div key={`row-${sl}`} className="flex items-center gap-2">
-                        <div className="w-16 text-xs text-slate-400 text-right pr-2">SL {sl}</div>
+                        <div className="w-16 text-xs text-slate-400 text-right pr-2">SL x{sl}</div>
                         <div className="flex-1 grid grid-cols-3 gap-2">
-                          {Array.from(new Set(result.gridResults.map((r: any) => r.tp))).sort((a: any, b: any) => Number(a) - Number(b)).map((tp: any) => {
-                            const cell = result.gridResults.find((r: any) => r.sl === sl && r.tp === tp);
+                          {Array.from(new Set(result.gridResults.map((r: any) => r.confThreshold))).sort((a: any, b: any) => Number(a) - Number(b)).map((tp: any) => {
+                            const cell = result.gridResults.find((r: any) => r.slMult === sl && r.confThreshold === tp);
                             if (!cell) return <div key={`cell-${sl}-${tp}`} className="bg-slate-800 rounded p-2 h-16"></div>;
                             
                             // Define color intensity based on Sharpe
@@ -190,11 +266,11 @@ export const OptimizerTab: React.FC = () => {
                               <div key={`cell-${sl}-${tp}`} className={`${bgClass} rounded-lg p-2 flex flex-col items-center justify-center relative group min-h-[4rem]`}>
                                 {isBest && <span className="absolute -top-2 -right-2 text-lg">⭐</span>}
                                 <span className={`font-bold ${isBest ? 'text-slate-900' : 'text-white'}`}>{cell.sharpeRatio.toFixed(2)}</span>
-                                <span className={`text-[10px] ${isBest ? 'text-slate-800' : 'text-slate-400'}`}>TP {tp}</span>
+                                <span className={`text-[10px] ${isBest ? 'text-slate-800' : 'text-slate-400'}`}>Conf {tp.toFixed(0)}%</span>
                                 
                                 {/* Tooltip */}
                                 <div className="absolute opacity-0 group-hover:opacity-100 bottom-full left-1/2 -translate-x-1/2 mb-2 bg-slate-900 text-white text-xs p-2 rounded shadow-xl border border-slate-700 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                                  <p className="font-bold mb-1">SL: {sl} | TP: {tp}</p>
+                                  <p className="font-bold mb-1">SL x{sl} | Conf {tp.toFixed(0)}%</p>
                                   <p>Sharpe: {cell.sharpeRatio.toFixed(2)}</p>
                                   <p>WinRate: {cell.winRate.toFixed(1)}%</p>
                                   <p>Net Profit: ${cell.netProfit}</p>
@@ -219,8 +295,8 @@ export const OptimizerTab: React.FC = () => {
                   <table className="w-full text-left text-sm text-slate-300">
                     <thead className="bg-slate-900/80 text-slate-400">
                       <tr>
-                        <th className="px-4 py-3 rounded-tl-lg">Stop Loss</th>
-                        <th className="px-4 py-3">Take Profit</th>
+                        <th className="px-4 py-3 rounded-tl-lg">SL Multiplier</th>
+                        <th className="px-4 py-3">ML Confidence</th>
                         <th className="px-4 py-3">Win Rate</th>
                         <th className="px-4 py-3">Max DD</th>
                         <th className="px-4 py-3 rounded-tr-lg">Sharpe Ratio</th>
@@ -229,8 +305,8 @@ export const OptimizerTab: React.FC = () => {
                     <tbody className="divide-y divide-white/5">
                       {result.gridResults.map((r: any, idx: number) => (
                         <tr key={idx} className={r.sharpeRatio === result.bestReport.sharpeRatio ? "bg-emerald-500/10" : ""}>
-                          <td className="px-4 py-3">{r.sl}</td>
-                          <td className="px-4 py-3">{r.tp}</td>
+                          <td className="px-4 py-3">x{r.slMult} ATR</td>
+                          <td className="px-4 py-3">{r.confThreshold.toFixed(0)}%</td>
                           <td className="px-4 py-3">{r.winRate.toFixed(2)}%</td>
                           <td className="px-4 py-3">{r.maxDrawdownPct.toFixed(2)}%</td>
                           <td className="px-4 py-3 font-semibold">{r.sharpeRatio.toFixed(2)}</td>

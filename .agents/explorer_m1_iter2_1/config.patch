@@ -1,0 +1,10 @@
+--- a/infrastructure/config.py
++++ b/infrastructure/config.py
+@@ -54,4 +54,7 @@
+     @property
+     def is_telegram_enabled(self) -> bool:
+-        return bool(self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_CHAT_ID)
++        return bool(
++            self.TELEGRAM_BOT_TOKEN and self.TELEGRAM_BOT_TOKEN.strip()
++            and self.TELEGRAM_CHAT_ID and self.TELEGRAM_CHAT_ID.strip()
++        )

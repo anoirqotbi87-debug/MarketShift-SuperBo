@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from 'recharts';
 import { Server, Activity, Clock, Zap } from 'lucide-react';
 import { MT5AccountState } from '../types';
+import { getApiBaseUrl } from '../utils/api';
 
 interface InfraDataPoint {
   time: string;
   latency: number;
   throughput: number;
+  cpu_usage?: number;
+  ram_usage?: number;
 }
 
 export const InfrastructureMonitor: React.FC<{ accountState: MT5AccountState }> = ({ accountState }) => {
@@ -14,44 +17,49 @@ export const InfrastructureMonitor: React.FC<{ accountState: MT5AccountState }> 
   const [uptime, setUptime] = useState(0); // in seconds
   
   useEffect(() => {
-    // Generate initial data
+    // Generate initial empty data to avoid layout shift
     const initial = [];
     const now = new Date();
     for (let i = 20; i >= 0; i--) {
       const t = new Date(now.getTime() - i * 1000);
       initial.push({
         time: t.toLocaleTimeString([], { hour12: false, minute: '2-digit', second: '2-digit' }),
-        latency: 14 + Math.random() * 5,
-        throughput: 120 + Math.random() * 40
+        latency: 0,
+        throughput: 0
       });
     }
     setData(initial);
   }, []);
 
   useEffect(() => {
+    const fetchHealth = async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/system-health`);
+        const health = await res.json();
+        
+        setData(prev => {
+          const newData = [...prev.slice(1)];
+          newData.push({
+            time: health.time,
+            latency: health.latency,
+            throughput: health.throughput,
+            cpu_usage: health.cpu_usage,
+            ram_usage: health.ram_usage
+          });
+          return newData;
+        });
+      } catch (e) {
+        // Fallback for disconnect
+      }
+    };
+
     const timer = setInterval(() => {
       setUptime(prev => prev + 1);
-      
-      setData(prev => {
-        const newData = [...prev.slice(1)];
-        const last = prev[prev.length - 1];
-        
-        let newLatency = accountState.pingMs + (Math.random() * 6 - 3);
-        if (newLatency < 5) newLatency = 5;
-        
-        const newThroughput = 120 + Math.random() * 50;
-        
-        newData.push({
-          time: new Date().toLocaleTimeString([], { hour12: false, minute: '2-digit', second: '2-digit' }),
-          latency: Number(newLatency.toFixed(1)),
-          throughput: Number(newThroughput.toFixed(0))
-        });
-        
-        return newData;
-      });
+      fetchHealth();
     }, 1000);
+    
     return () => clearInterval(timer);
-  }, [accountState.pingMs]);
+  }, []);
 
   const formatUptime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);

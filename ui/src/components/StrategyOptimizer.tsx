@@ -4,6 +4,7 @@ import {
   Sliders, Play, Sparkles, TrendingUp, BarChart2, Cpu, Zap, Award, 
   CheckCircle2, Flame, RefreshCw, Layers, ShieldCheck, Target, ArrowUpRight, ChevronRight
 } from 'lucide-react';
+import { getApiBaseUrl } from '../utils/api';
 import { 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, CartesianGrid 
 } from 'recharts';
@@ -82,62 +83,65 @@ const PARAM_DEFINITIONS: Record<ParamType, ParamDef> = {
 };
 
 export const StrategyOptimizer: React.FC<StrategyOptimizerProps> = ({ mlStats, onApplyOptimalParams }) => {
-  const [paramX, setParamX] = useState<ParamType>('xgbDepth');
-  const [paramY, setParamY] = useState<ParamType>('lstmUnits');
+  const [paramX, setParamX] = useState<ParamType>('slMult');
+  const [paramY, setParamY] = useState<ParamType>('confThreshold');
   const [metric, setMetric] = useState<'netProfit' | 'sharpeRatio' | 'winRate' | 'profitFactor'>('sharpeRatio');
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
-  const [optimizationProgress, setOptimizationProgress] = useState<number>(100);
-  const [selectedCell, setSelectedCell] = useState<{ xIdx: number; yIdx: number } | null>({ xIdx: 3, yIdx: 2 });
+  const [optimizationProgress, setOptimizationProgress] = useState<number>(0);
+  const [selectedCell, setSelectedCell] = useState<{ xIdx: number; yIdx: number } | null>(null);
   const [appliedSuccessMessage, setAppliedSuccessMessage] = useState<string | null>(null);
+  const [backendGridData, setBackendGridData] = useState<any[] | null>(null);
 
   const defX = PARAM_DEFINITIONS[paramX];
   const defY = PARAM_DEFINITIONS[paramY];
 
-  // Generate deterministic realistic sensitivity matrix data based on paramX and paramY
+  // Map backend 1D results to 2D matrix for UI, or show empty matrix
   const gridData = useMemo(() => {
     const matrix: OptimalParamSet[][] = [];
 
     defY.values.forEach((valY, yIdx) => {
       const row: OptimalParamSet[] = [];
       defX.values.forEach((valX, xIdx) => {
-        // Pseudo-random deterministic formula simulating convex optimization landscape
-        const numX = typeof valX === 'number' ? valX : xIdx + 1;
-        const numY = typeof valY === 'number' ? valY : yIdx + 1;
-
-        // Peak center around middle of grid
-        const centerX = defX.values.length / 2;
-        const centerY = defY.values.length / 2;
-        const dist = Math.sqrt(Math.pow(xIdx - centerX, 2) + Math.pow(yIdx - centerY, 2));
-
-        const baseProfit = 2400 - dist * 420 + (Math.sin(numX * 1.5 + numY) * 350);
-        const netProfit = Math.round(baseProfit);
-
-        const winRate = Math.min(88, Math.max(48, Math.round(68 - dist * 4.5 + (numX % 2 === 0 ? 3 : -2))));
-        const sharpeRatio = Math.max(0.8, Math.round((2.85 - dist * 0.35 + (numY % 2 === 0 ? 0.2 : -0.1)) * 100) / 100);
-        const maxDrawdown = Math.max(2.1, Math.round((4.2 + dist * 1.2 + (numX > 4 ? 2.5 : 0)) * 10) / 10);
-        const profitFactor = Math.max(1.1, Math.round((2.4 - dist * 0.28) * 100) / 100);
-
-        const overfitRisk: 'FAIBLE' | 'MODÉRÉ' | 'ÉLEVÉ' = 
-          dist > 2.2 ? 'ÉLEVÉ' : dist > 1.2 ? 'MODÉRÉ' : 'FAIBLE';
-
-        row.push({
+        // Default empty cell
+        let cell: OptimalParamSet = {
           paramXName: defX.label,
           paramXVal: valX,
           paramYName: defY.label,
           paramYVal: valY,
-          netProfit,
-          winRate,
-          sharpeRatio,
-          maxDrawdown,
-          profitFactor,
-          overfitRisk
-        });
+          netProfit: 0,
+          winRate: 0,
+          sharpeRatio: 0,
+          maxDrawdown: 0,
+          profitFactor: 0,
+          overfitRisk: 'FAIBLE'
+        };
+
+        // If backend data exists, try to find matching result
+        if (backendGridData) {
+          const match = backendGridData.find(d => 
+            (d[paramX] === valX || d[paramX] === undefined) && 
+            (d[paramY] === valY || d[paramY] === undefined)
+          );
+          if (match) {
+            cell.netProfit = match.netProfit || 0;
+            cell.winRate = match.winRate || 0;
+            cell.sharpeRatio = match.sharpeRatio || 0;
+            cell.maxDrawdown = match.maxDrawdownPct || 0;
+            cell.profitFactor = match.profitFactor || 1.0;
+            
+            // Simple overfit heuristic based on sharpe and winrate
+            if (cell.sharpeRatio > 8.0 || cell.winRate > 95) cell.overfitRisk = 'ÉLEVÉ';
+            else if (cell.sharpeRatio > 4.5 || cell.winRate > 85) cell.overfitRisk = 'MODÉRÉ';
+            else cell.overfitRisk = 'FAIBLE';
+          }
+        }
+        row.push(cell);
       });
       matrix.push(row);
     });
 
     return matrix;
-  }, [paramX, paramY, defX, defY]);
+  }, [paramX, paramY, defX, defY, backendGridData]);
 
   // Find overall optimal cell in matrix for current metric
   const optimalCellCoords = useMemo(() => {
@@ -182,51 +186,72 @@ export const StrategyOptimizer: React.FC<StrategyOptimizerProps> = ({ mlStats, o
       .slice(0, 5);
   }, [gridData, metric]);
 
-  // Execute Grid Search (Real API Call)
+  // Execute Grid Search (Real API Call with Polling)
   const handleRunOptimization = async () => {
     setIsOptimizing(true);
     setOptimizationProgress(0);
     setAppliedSuccessMessage(null);
-
-    // Fake progress bar while waiting for backend
-    let prog = 0;
-    const interval = setInterval(() => {
-      prog += 5;
-      if (prog > 95) prog = 95;
-      setOptimizationProgress(prog);
-    }, 500);
+    setBackendGridData(null);
 
     try {
-      // Create FormData to send to FastAPI
       const formData = new FormData();
       formData.append('symbol', 'EURUSD#'); // or get from context
       formData.append('initial_capital', '10000.0');
 
-      const res = await fetch(`http://${window.location.hostname}:8000/optimize`, {
+      const res = await fetch(`${getApiBaseUrl()}/optimize`, {
         method: 'POST',
         body: formData,
       });
 
-      const data = await res.json();
+      const initData = await res.json();
       
-      if (data.error) {
-        console.error("Optimization Error:", data.error);
-        setAppliedSuccessMessage(`Erreur: ${data.error}`);
-      } else {
-        // Here we could update the grid data with the actual results
-        // For now, we just show success and stop the spinner
-        console.log("Optimization Result:", data);
-        setAppliedSuccessMessage(`Optimisation terminée! Meilleur Sharpe: ${data.sharpeRatio || 'N/A'}`);
+      if (initData.error || !initData.job_id) {
+        setAppliedSuccessMessage(`Erreur: ${initData.error || "Impossible de démarrer l'optimisation"}`);
+        setIsOptimizing(false);
+        return;
       }
+
+      const jobId = initData.job_id;
+      
+      // Polling
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusRes = await fetch(`${getApiBaseUrl()}/optimize/status/${jobId}`);
+          const statusData = await statusRes.json();
+          
+          if (statusData.status === 'running') {
+            setOptimizationProgress(statusData.progress || 0);
+          } else if (statusData.status === 'completed') {
+            clearInterval(pollInterval);
+            setOptimizationProgress(100);
+            
+            if (statusData.result && statusData.result.gridResults) {
+              setBackendGridData(statusData.result.gridResults);
+              setAppliedSuccessMessage(`Optimisation terminée! Meilleur Sharpe: ${statusData.result.bestReport.sharpeRatio}`);
+              // Auto select best cell
+              const bestConf = statusData.result.bestParams.confThreshold;
+              const bestSl = statusData.result.bestParams.slMult;
+              // Assuming paramX=slMult, paramY=confThreshold
+              const xIdx = PARAM_DEFINITIONS['slMult'].values.indexOf(bestSl);
+              const yIdx = PARAM_DEFINITIONS['confThreshold'].values.indexOf(bestConf);
+              if (xIdx !== -1 && yIdx !== -1) setSelectedCell({ xIdx, yIdx });
+            }
+            
+            setTimeout(() => setIsOptimizing(false), 500);
+          } else if (statusData.status === 'error') {
+            clearInterval(pollInterval);
+            setAppliedSuccessMessage(`Erreur: ${statusData.error}`);
+            setIsOptimizing(false);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }, 1000);
+
     } catch (err) {
       console.error("Optimization Fetch Error:", err);
       setAppliedSuccessMessage("Erreur de connexion au serveur d'optimisation.");
-    } finally {
-      clearInterval(interval);
-      setOptimizationProgress(100);
-      setTimeout(() => {
-        setIsOptimizing(false);
-      }, 500);
+      setIsOptimizing(false);
     }
   };
 

@@ -1,0 +1,34 @@
+=== TRUE OVERALL PERFORMANCE ===
+Total valid trades (excluding deposits): 146
+Overall True Winrate: 51.37%
+Overall True PnL: $-194.48
+================================
+
+Total trades since yesterday: 37
+Winrate: 51.35%
+Total PnL (48h): $5.45
+
+Colonnes disponibles dans la base de données :
+['id', 'ticket', 'symbol', 'type', 'volume', 'open_price', 'close_price', 'sl', 'tp', 'profit', 'open_time', 'close_time', 'duration']
+
+--- Analyse détaillée des trades sur l'OR (GOLDmicro) ---
+Total trades GOLD: 16
+Total PnL GOLD: $6.51
+
+Trades GOLD (Pertes majeures < -1$):
+        ticket  type  volume  profit open_price close_price
+158  167838247  SELL     0.5  -14.82       None        None
+151  167571340  SELL     0.5   -5.80       None        None
+164  168229192  SELL     0.5   -5.03       None        None
+153  167748697  SELL     0.5   -3.79       None        None
+141  167485859  SELL     0.5   -2.56       None        None
+
+Trades ETHUSD (Toutes les pertes):
+        ticket type  volume  profit open_price close_price
+132  167342528  NaN     NaN   -0.50       None        None
+134  167376344  NaN     NaN   -0.30       None        None
+135  167376345  NaN     NaN   -0.30       None        None
+136  167376347  NaN     NaN   -0.35       None        None
+137  167376348  NaN     NaN   -0.34       None        None
+138  167376349  NaN     NaN   -0.36       None        None
+139  167470289  BUY    0.02   -0.40       None        None

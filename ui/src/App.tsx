@@ -10,16 +10,19 @@ import { LoginScreen } from './components/LoginScreen';
 import { Header } from './components/Header';
 import { MainAppView } from './components/MainAppView';
 import { ArchitectureDocView } from './components/ArchitectureDocView';
+import { BottomNavigation } from './components/BottomNavigation';
 import { useMT5Connection } from './hooks/useMT5Connection';
 import { ReconnectionToast } from './components/ReconnectionToast';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
+import { getApiBaseUrl } from './utils/api';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
   const [viewMode, setViewMode] = useState<ViewMode>('simulator');
+  const [activeTab, setActiveTab] = useState<ActiveTabSimulator>('dashboard');
 
   // Theme Mode ('vanguard_obsidian' | 'lumina_clean' | 'deep_ocean' | 'goldman_prestige' | 'monochrome_terminal') with localStorage persistence
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
@@ -98,14 +101,30 @@ export default function App() {
     }
   });
 
-  // Risk Configuration
   const [riskConfig, setRiskConfig] = useState<RiskConfig>(() => {
     try {
       const saved = localStorage.getItem('marketshift_risk_config');
+      console.log("[App] Loading RiskConfig from localStorage:", saved);
       if (saved) {
         const parsed = JSON.parse(saved);
-        parsed.useLocalBridge = true;
-        parsed.localBridgeIp = `http://${window.location.hostname}:8000`;
+
+        // --- AUTO-FIX / MIGRATION ---
+        // 1. If it looks like a fresh install or bad data, default to Cloud
+        if (parsed.useLocalBridge === undefined) parsed.useLocalBridge = false;
+
+        // 2. If the user put the UUID in the Token field (common mistake)
+        // UUIDs are 36 chars long. Real MetaApi tokens are very long JWTs.
+        if (parsed.metaApiToken && parsed.metaApiToken.length === 36 && parsed.metaApiToken.includes('-')) {
+            console.warn("[App] MIGRATION: Moving UUID from Token to AccountID field");
+            parsed.metaApiAccountId = parsed.metaApiToken;
+            parsed.metaApiToken = "";
+            parsed.useLocalBridge = false;
+        }
+
+        // Keep the saved IP if it exists, otherwise default to hostname
+        if (!parsed.localBridgeIp) {
+            parsed.localBridgeIp = `${getApiBaseUrl()}`;
+        }
         return parsed;
       }
     } catch {
@@ -124,8 +143,8 @@ export default function App() {
       circuitBreakerActive: false,
       enableNewsSentimentFilter: true,
       minNewsSentimentScore: -0.60,
-      useLocalBridge: true,
-      localBridgeIp: `http://${window.location.hostname}:8000`
+      useLocalBridge: false,
+      localBridgeIp: `${getApiBaseUrl()}`
     };
   });
 
@@ -177,7 +196,7 @@ export default function App() {
     ]);
   };
 
-  const { forceReconnect, simulateDisconnect, executeTrade, closePosition, wsStatus } = useMT5Connection(
+  const { forceReconnect, simulateDisconnect, executeTrade, closePosition, wsStatus, wsErrorMsg } = useMT5Connection(
     accountState,
     setAccountState,
     riskConfig,
@@ -270,13 +289,13 @@ export default function App() {
   if (!user) return <LoginScreen />;
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
+    <div className="h-full flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-cyan-500 selection:text-slate-950">
       
       {/* Global Alerts */}
       <Toaster theme="dark" position="top-right" richColors />
 
       {/* App Header */}
-      <Header
+      <Header 
         viewMode={viewMode}
         setViewMode={setViewMode}
         themeMode={themeMode}
@@ -284,12 +303,15 @@ export default function App() {
         accountState={accountState}
         setAccountState={setAccountState}
         riskConfig={riskConfig}
-            setRiskConfig={setRiskConfig}
+        setRiskConfig={setRiskConfig}
         onTriggerCircuitBreaker={handleTriggerCircuitBreaker}
         onResetCircuitBreaker={handleResetCircuitBreaker}
         onForceReconnect={forceReconnect}
         onSimulateDisconnect={simulateDisconnect}
+        isWsConnected={wsStatus === 'connected'}
         wsStatus={wsStatus}
+        wsErrorMsg={wsErrorMsg}
+        onWsReconnect={forceReconnect}
       />
 
       {/* Main View Area */}
@@ -313,6 +335,8 @@ export default function App() {
               onResetCircuitBreaker={handleResetCircuitBreaker}
               executeTrade={executeTrade}
               closePosition={closePosition}
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
             />
           </ErrorBoundary>
         ) : (
@@ -321,14 +345,19 @@ export default function App() {
         <ReconnectionToast reconnectionState={accountState.reconnectionState} />
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
+      <footer className="hidden md:block border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>BotTrading MT5 Android ML — Architecture & Engine Hub</div>
           <div className="text-[11px]">Développé avec React 19, Tailwind CSS, Express, ZeroMQ & Gemini AI</div>
         </div>
       </footer>
 
+      <BottomNavigation
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+      />
     </div>
   );
 }

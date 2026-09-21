@@ -250,24 +250,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {!localRisk.useLocalBridge ? (
                       <>
                         <div>
-                          <label className="block text-xs font-bold text-slate-400 mb-1">MetaApi Token (JWT)</label>
+                          <label className="block text-xs font-bold text-slate-400 mb-1">MetaApi Token (Clé JWT très longue)</label>
                           <input 
                             type="password" 
                             value={localRisk.metaApiToken || ''}
-                            onChange={(e) => setLocalRisk({...localRisk, metaApiToken: e.target.value})}
-                            placeholder="eyJhbGciOi..."
+                            onChange={(e) => setLocalRisk({...localRisk, metaApiToken: e.target.value.trim()})}
+                            placeholder="Copiez la clé JWT depuis 'API Access'"
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                           />
+                          <p className="text-[10px] text-slate-500 mt-1">C'est le 'Main Terminal API token' (chaîne de caractères très longue).</p>
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-400 mb-1">Account ID (MT4/MT5)</label>
+                          <label className="block text-xs font-bold text-slate-400 mb-1">MetaApi Account ID (UUID)</label>
                           <input 
                             type="text" 
                             value={localRisk.metaApiAccountId || ''}
-                            onChange={(e) => setLocalRisk({...localRisk, metaApiAccountId: e.target.value})}
-                            placeholder="f8c739ea-..."
+                            onChange={(e) => setLocalRisk({...localRisk, metaApiAccountId: e.target.value.trim()})}
+                            placeholder="72319ebb-..."
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
                           />
+                          <p className="text-[10px] text-slate-500 mt-1">C'est l'ID de 36 caractères affiché en haut de votre compte MetaApi.</p>
                         </div>
                       </>
                     ) : (

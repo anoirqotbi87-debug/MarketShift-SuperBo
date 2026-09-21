@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 
 try:
     import MetaTrader5 as mt5
@@ -68,6 +69,20 @@ class MT5Connector(IBrokerConnector):
             server=info.server
         )
 
+    def get_symbol_info(self, symbol: str) -> Optional[Any]:
+        if not self.connected: return None
+        with self._lock:
+            mt5.initialize()
+            info = mt5.symbol_info(symbol)
+        return info
+
+    def get_history_deals(self, from_date: Any, to_date: Any) -> Optional[Any]:
+        if not self.connected: return None
+        with self._lock:
+            mt5.initialize()
+            deals = mt5.history_deals_get(from_date, to_date)
+        return deals
+
     def get_positions(self, symbol: Optional[str] = None) -> List[PositionInfo]:
         if not self.connected: return []
         
@@ -106,6 +121,19 @@ class MT5Connector(IBrokerConnector):
                 logging.error(f"Symbol {symbol} non visible/invalide")
                 return None
                 
+            # Sécurisation du volume : Clamp et Arrondi
+            if volume < symbol_info.volume_min:
+                logging.warning(f"[MT5Connector] Volume {volume} trop petit. Ajusté à {symbol_info.volume_min}")
+                volume = symbol_info.volume_min
+            elif volume > symbol_info.volume_max:
+                logging.warning(f"[MT5Connector] Volume {volume} trop grand. Ajusté à {symbol_info.volume_max}")
+                volume = symbol_info.volume_max
+            
+            # Arrondi selon le step autorisé (ex: 0.01)
+            step = symbol_info.volume_step
+            if step > 0:
+                volume = round(volume / step) * step
+                
             action_type = mt5.ORDER_TYPE_BUY if order_type == OrderType.BUY else mt5.ORDER_TYPE_SELL
             price = mt5.symbol_info_tick(symbol).ask if order_type == OrderType.BUY else mt5.symbol_info_tick(symbol).bid
             
@@ -127,6 +155,14 @@ class MT5Connector(IBrokerConnector):
         with self._lock:
             mt5.initialize()
             result = mt5.order_send(request)
+            
+            # --- CORRECTION ANOMALIE : FALLBACK FOK ---
+            # Si le broker refuse le remplissage IOC (code 10030), on retente en FOK
+            if result.retcode == mt5.TRADE_RETCODE_INVALID_FILL:
+                logging.warning(f"[MT5Connector] Remplissage IOC refusé sur {symbol} (Code 10030), fallback en FOK...")
+                request["type_filling"] = mt5.ORDER_FILLING_FOK
+                result = mt5.order_send(request)
+
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logging.error(f"Erreur envoi ordre: {result.retcode} - {result.comment}")
             return None
@@ -160,34 +196,62 @@ class MT5Connector(IBrokerConnector):
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
         
-        with self._lock:
-            mt5.initialize()
-            result = mt5.order_send(request)
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            logging.error(f"Erreur clôture position: {result.retcode} - {result.comment}")
-            return False
+        # Mécanisme de Retry (jusqu'à 3 tentatives)
+        for attempt in range(3):
+            with self._lock:
+                mt5.initialize()
+                result = mt5.order_send(request)
+                
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                return True
+                
+            logging.error(f"[Retry {attempt+1}/3] Erreur clôture position {ticket}: {result.retcode} - {result.comment}")
+            time.sleep(0.5)
             
-        return True
+        return False
 
     def modify_position(self, ticket: int, symbol: str, new_sl: float) -> bool:
-        """Modifie le Stop Loss d'une position existante."""
+        """Modifie le Stop Loss d'une position existante avec vérification du Stops Level."""
         if not self.connected: return False
 
-        request = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "symbol": symbol,
-            "position": ticket,
-            "sl": float(new_sl)
-        }
+        # Mécanisme de Retry
+        for attempt in range(3):
+            with self._lock:
+                mt5.initialize()
+                symbol_info = mt5.symbol_info(symbol)
+                position = mt5.positions_get(ticket=ticket)
+                tick = mt5.symbol_info_tick(symbol)
+                
+                if symbol_info is None or not position or tick is None:
+                    continue # On retente si l'API est lente
+                    
+                pos = position[0]
+                min_dist = getattr(symbol_info, 'trade_stops_level', 0) * symbol_info.point
+                
+                # Ajustement de sécurité (StopsLevel protection)
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    if (tick.bid - new_sl) < min_dist:
+                        new_sl = tick.bid - min_dist
+                else:
+                    if (new_sl - tick.ask) < min_dist:
+                        new_sl = tick.ask + min_dist
+                
+                request = {
+                    "action": mt5.TRADE_ACTION_SLTP,
+                    "symbol": symbol,
+                    "position": ticket,
+                    "sl": round(float(new_sl), symbol_info.digits),
+                    "tp": pos.tp  # Préserver le TP existant !
+                }
+                result = mt5.order_send(request)
+                
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                return True
+                
+            logging.error(f"[Retry {attempt+1}/3] Erreur modif SL position {ticket}: {result.retcode} - {result.comment}")
+            time.sleep(0.5)
 
-        with self._lock:
-            mt5.initialize()
-            result = mt5.order_send(request)
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            logging.error(f"Erreur modif SL position {ticket}: {result.retcode} - {result.comment}")
-            return False
-
-        return True
+        return False
 
     def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[pd.DataFrame]:
         """Récupère l'historique OHLCV (Open, High, Low, Close, Volume) pour un symbole donné"""
@@ -199,11 +263,16 @@ class MT5Connector(IBrokerConnector):
             # S'assurer que le symbole est visible dans le Market Watch
             mt5.symbol_select(symbol, True)
                 
+            # --- CORRECTION ANOMALIE : RETRY CACHE MT5 ---
             # timeframe MT5 (ex: mt5.TIMEFRAME_M15)
-            rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)
+            for _ in range(3):
+                rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)
+                if rates is not None and len(rates) > 0:
+                    break
+                time.sleep(0.1)
         
         if rates is None or len(rates) == 0:
-            logging.error(f"Impossible de récupérer l'historique pour {symbol}")
+            logging.error(f"Impossible de récupérer l'historique pour {symbol} après 3 tentatives.")
             return None
             
         # Conversion en DataFrame Pandas

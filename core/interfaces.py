@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
 import datetime
 
@@ -13,7 +13,7 @@ class Signal(BaseModel):
     direction: OrderType
     confidence: float
     source: str  # e.g., "EMA_Strategy", "ML_Filter"
-    timestamp: datetime.datetime = datetime.datetime.now()
+    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now)
     metadata: Dict[str, Any] = {}
     # ATR-based SL/TP (en pips, calculés par les stratégies)
     sl_pips: Optional[float] = None
@@ -74,6 +74,14 @@ class IBrokerConnector(ABC):
     @abstractmethod
     def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[Any]:
         """Récupère l'historique OHLCV sous forme de DataFrame"""
+        pass
+
+    @abstractmethod
+    def get_symbol_info(self, symbol: str) -> Optional[Any]:
+        pass
+
+    @abstractmethod
+    def get_history_deals(self, from_date: Any, to_date: Any) -> Optional[Any]:
         pass
 
 class IStrategy(ABC):

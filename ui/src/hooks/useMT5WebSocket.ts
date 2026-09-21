@@ -17,6 +17,8 @@ export interface WsSnapshot {
     server: string;
     broker: string;
     isConnected: boolean;
+    dailyPnL?: number;
+    dailyPnLPct?: number;
   };
   positions?: WsPosition[];
   signals?: Record<string, WsSignal>;
@@ -96,6 +98,7 @@ export function useMT5WebSocket({
 
   const [status, setStatus]     = useState<WsStatus>('connecting');
   const [lastData, setLastData] = useState<WsSnapshot | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string>('');
 
   const updateStatus = useCallback((s: WsStatus) => {
     setStatus(s);
@@ -105,7 +108,6 @@ export function useMT5WebSocket({
   const connect = useCallback(() => {
     if (!mountedRef.current || !enabled) return;
 
-    // Nettoyer la connexion précédente
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.onerror = null;
@@ -113,6 +115,7 @@ export function useMT5WebSocket({
     }
 
     updateStatus(attemptsRef.current === 0 ? 'connecting' : 'reconnecting');
+    setErrorMsg('');
 
     try {
       const ws = new WebSocket(url);
@@ -122,6 +125,7 @@ export function useMT5WebSocket({
         if (!mountedRef.current) return;
         attemptsRef.current = 0;
         updateStatus('connected');
+        setErrorMsg('');
         console.log('[WS] ✅ Connecté au backend Python');
       };
 
@@ -129,7 +133,7 @@ export function useMT5WebSocket({
         if (!mountedRef.current) return;
         try {
           const data: WsSnapshot = JSON.parse(event.data);
-          if (data.type === 'ping') return; // Ignorer les pings
+          if (data.type === 'ping') return;
           setLastData(data);
           onSnapshot?.(data);
         } catch (e) {
@@ -142,7 +146,6 @@ export function useMT5WebSocket({
         console.warn(`[WS] Connexion fermée (code: ${event.code}). Reconnexion...`);
 
         if (attemptsRef.current < maxReconnectAttempts) {
-          // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
           const delay = Math.min(
             reconnectBaseDelayMs * Math.pow(2, attemptsRef.current),
             30000
@@ -156,19 +159,20 @@ export function useMT5WebSocket({
         }
       };
 
-      ws.onerror = (err) => {
+      ws.onerror = (err: any) => {
         if (!mountedRef.current) return;
         console.error('[WS] Erreur:', err);
+        setErrorMsg(err.message || 'Unknown Network Error');
         updateStatus('error');
       };
 
-    } catch (e) {
+    } catch (e: any) {
       console.error('[WS] Impossible de créer WebSocket:', e);
+      setErrorMsg(e.message || 'Exception during WebSocket creation');
       updateStatus('fallback_polling');
     }
   }, [url, enabled, maxReconnectAttempts, reconnectBaseDelayMs, updateStatus, onSnapshot]);
 
-  // Connexion initiale
   useEffect(() => {
     mountedRef.current = true;
     if (enabled) {
@@ -191,5 +195,5 @@ export function useMT5WebSocket({
     connect();
   }, [connect]);
 
-  return { status, lastData, forceReconnect };
+  return { status, lastData, forceReconnect, errorMsg };
 }
