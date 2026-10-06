@@ -123,6 +123,13 @@ class MLPredictor:
         direction, confidence, _ = self.predict(df)
         signal_dir = signal.direction.name  # 'BUY' or 'SELL'
 
+        # Log de traçabilité systématique (clé du diagnostic)
+        logging.debug(
+            f"[MLPredictor] [{signal.symbol}] Signal {signal_dir} | "
+            f"IA→{direction} @ {confidence:.1%} | seuil={confidence_threshold:.1%} | "
+            f"accord={'OUI' if direction == signal_dir else 'NON ⛔'}"
+        )
+
         if direction == signal_dir:
             if confidence >= confidence_threshold:
                 # Accord total et haute confiance
