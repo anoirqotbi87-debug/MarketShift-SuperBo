@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WsSnapshot } from "@/types/trading";
+import { getConnection } from "@/lib/api";
 
 /**
  * Client WebSocket temps réel avec reconnexion exponentielle.
@@ -12,7 +13,7 @@ import type { WsSnapshot } from "@/types/trading";
  * - Garde-fou : ignore les messages "ping" / malformés.
  */
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
+const WS_FALLBACK = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000];
@@ -63,7 +64,9 @@ export function useMarketShiftWS() {
     // Si une socket est en cours d'ouverture/connexion, on ne relance pas.
     if (wsRef.current && wsRef.current.readyState <= WebSocket.OPEN) return;
 
-    const url = `${WS_URL}?api_key=${encodeURIComponent(API_KEY)}`;
+    // URL dynamique : suit la connexion active (bascule localhost ↔ tunnel).
+    const wsUrl = getConnection().wsUrl || WS_FALLBACK;
+    const url = `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}`;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
@@ -136,5 +139,18 @@ export function useMarketShiftWS() {
     };
   }, [connect]);
 
-  return { snapshot, connected, latencyMs };
+  /** Force une reconnexion immédiate (utilisé lors d'un changement d'endpoint). */
+  const reconnect = useCallback(() => {
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (pingTimerRef.current) clearInterval(pingTimerRef.current);
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    retryRef.current = 0;
+    connect();
+  }, [connect]);
+
+  return { snapshot, connected, latencyMs, reconnect };
 }

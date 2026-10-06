@@ -6,14 +6,28 @@ import KpiGrid from "@/components/KpiGrid";
 import ActivePositions from "@/components/ActivePositions";
 import EquityChart from "@/components/EquityChart";
 import TelemetryConsole from "@/components/TelemetryConsole";
+import GridSearch from "@/components/GridSearch";
+import BacktestStudio from "@/components/BacktestStudio";
+import ConfigPanel from "@/components/ConfigPanel";
+import Sidebar, { type DashboardView } from "@/components/Sidebar";
 import { fetchEquityCurve, fetchKpiMetrics } from "@/lib/api";
 import { useMarketShiftWS } from "@/hooks/useMarketShiftWS";
 import type { EquityPoint, KpiMetrics } from "@/types/trading";
 
 const POLL_MS = 10000;
 
+const VIEW_TITLES: Record<DashboardView, string> = {
+  live: "LIVE MONITORING",
+  grid: "GRID SEARCH",
+  backtest: "BACKTEST STUDIO",
+  config: "CONFIG & RISQUE",
+};
+
 export default function DashboardPage() {
-  const { snapshot, connected, latencyMs } = useMarketShiftWS();
+  const { snapshot, connected, latencyMs, reconnect } = useMarketShiftWS();
+  const [view, setView] = useState<DashboardView>("live");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [equity1D, setEquity1D] = useState<EquityPoint[]>([]);
   const [equity1M, setEquity1M] = useState<EquityPoint[]>([]);
@@ -54,43 +68,63 @@ export default function DashboardPage() {
   }, []);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 p-4 lg:p-6">
-      <Header
-        snapshot={snapshot}
-        connected={connected}
-        latencyMs={latencyMs}
-        symbolsCount={snapshot.signals ? Object.keys(snapshot.signals).length : null}
+    <div className="flex h-screen w-full overflow-hidden bg-zinc-950 text-zinc-100">
+      {/* Sidebar pliable (desktop) / drawer (mobile) */}
+      <Sidebar
+        view={view}
+        onSelect={setView}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((v) => !v)}
+        mobileOpen={mobileMenuOpen}
+        onCloseMobile={() => setMobileMenuOpen(false)}
       />
 
-      <KpiGrid snapshot={snapshot} equityCurve={equity1D} kpi={kpi} />
+      {/* Zone principale */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Header
+          snapshot={snapshot}
+          connected={connected}
+          latencyMs={latencyMs}
+          symbolsCount={snapshot.signals ? Object.keys(snapshot.signals).length : null}
+          onReconnect={reconnect}
+          onOpenMenu={() => setMobileMenuOpen(true)}
+          title={VIEW_TITLES[view]}
+        />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        {/* Graphique d'équité (2/3 de large) */}
-        <div className="lg:col-span-3">
-          <EquityChart
-            data1D={equity1D}
-            data1M={equity1M}
-            benchmark={benchmark}
-            loading={loadingChart}
-          />
-        </div>
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+          <div className="mx-auto flex min-h-full w-full max-w-[1600px] flex-col gap-4">
+            {view === "live" && (
+              <>
+                <KpiGrid snapshot={snapshot} equityCurve={equity1D} kpi={kpi} />
 
-        {/* Console télémétrie (1/3 de large) */}
-        <div className="lg:col-span-2">
-          <TelemetryConsole
-            logs={snapshot.logs ?? []}
-            signals={snapshot.signals ?? {}}
-            ml={snapshot.ml ?? { trained: false, accuracy: 0, sampleCount: 0, lastTrained: "", featureImportances: [] }}
-          />
-        </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                  <div className="lg:col-span-3">
+                    <EquityChart
+                      data1D={equity1D}
+                      data1M={equity1M}
+                      benchmark={benchmark}
+                      loading={loadingChart}
+                    />
+                  </div>
+                  <div className="lg:col-span-2">
+                    <TelemetryConsole
+                      logs={snapshot.logs ?? []}
+                      signals={snapshot.signals ?? {}}
+                      ml={snapshot.ml ?? { trained: false, accuracy: 0, sampleCount: 0, lastTrained: "", featureImportances: [] }}
+                    />
+                  </div>
+                </div>
+
+                <ActivePositions positions={snapshot.positions ?? []} />
+              </>
+            )}
+
+            {view === "grid" && <GridSearch />}
+            {view === "backtest" && <BacktestStudio />}
+            {view === "config" && <ConfigPanel />}
+          </div>
+        </main>
       </div>
-
-      {/* Positions actives pleine largeur */}
-      <ActivePositions positions={snapshot.positions ?? []} />
-
-      <footer className="pb-4 pt-2 text-center font-mono text-[10px] text-zinc-700">
-        MarketShift SuperBot · backend FastAPI :8000 · snapshot WebSocket toutes les 2s · rendu client
-      </footer>
-    </main>
+    </div>
   );
 }
