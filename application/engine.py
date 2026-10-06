@@ -37,7 +37,53 @@ from strategies.smc_ict import SMCStrategy
 from strategies.amd_ict import AMDStrategy
 from strategies.base import StrategyBase
 
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    # MetaTrader5 est un paquet Windows-only ; sur Linux/CI on fournit des constantes de repli
+    # pour que les tests unitaires puissent importer l'Engine (même pattern que TelegramNotifier).
+    class _MT5Fallback:
+        TIMEFRAME_M1 = 1
+        TIMEFRAME_M5 = 5
+        TIMEFRAME_M15 = 15
+        TIMEFRAME_H1 = 16385
+        TIMEFRAME_D1 = 16408
+        SYMBOL_TRADE_MODE_FULL = 0
+        ORDER_TYPE_BUY = 0
+        ORDER_TYPE_SELL = 1
+        ORDER_TIME_GTC = 0
+        ORDER_FILLING_IOC = 2
+        ORDER_FILLING_FOK = 1
+        TRADE_ACTION_DEAL = 1
+        POSITION_TYPE_BUY = 0
+        POSITION_TYPE_SELL = 1
+        DEAL_TYPE_BUY = 0
+        DEAL_TYPE_SELL = 1
+        DEAL_REASON_CLIENT = 0
+        DEAL_REASON_MOBILE = 1
+        DEAL_REASON_WEB = 2
+        DEAL_REASON_EXPERT = 3
+        DEAL_REASON_SL = 4
+        DEAL_REASON_TP = 5
+        DEAL_REASON_SO = 6
+        DEAL_REASON_ROLLOVER = 7
+        DEAL_REASON_VMARGIN = 8
+        DEAL_REASON_SPLIT = 9
+        DEAL_ENTRY_IN = 0
+        DEAL_ENTRY_OUT = 1
+        DEAL_ENTRY_INOUT = 2
+        DEAL_ENTRY_OUT_BY = 3
+        ACCOUNT_TRADE_MODE_DEMO = 0
+        ACCOUNT_TRADE_MODE_CONTEST = 1
+        ACCOUNT_TRADE_MODE_REAL = 2
+
+        def __getattr__(self, name):
+            return 0
+
+    mt5 = _MT5Fallback()
+    logging.getLogger(__name__).warning(
+        "MetaTrader5 not available (Windows-only package). Engine runs with MT5 constants fallback."
+    )
 
 from ml.trainer import MLTrainer
 from ml.predictor import MLPredictor
@@ -533,30 +579,31 @@ class Engine:
         comment = str(getattr(deal, 'comment', '')).lower()
         reason = getattr(deal, 'reason', None)
 
-        # 1. Take Profit (DEAL_REASON_TP = 5 ou mention [tp])
-        if reason == getattr(mt5, 'DEAL_REASON_TP', 5) or "[tp]" in comment or " tp" in comment or comment.startswith("tp"):
+        # 1. Take Profit (DEAL_REASON_TP = 5 ou mention [tp]/[tp xx])
+        if reason == getattr(mt5, 'DEAL_REASON_TP', 5) or "[tp" in comment or " tp" in comment or comment.rstrip().endswith("tp") or comment.lstrip().startswith("tp"):
             return "Take Profit (TP)"
             
-        # 2. Stop Loss (DEAL_REASON_SL = 4 ou mention [sl])
-        if reason == getattr(mt5, 'DEAL_REASON_SL', 4) or "[sl]" in comment or " sl" in comment or comment.startswith("sl"):
+        # 2. Stop Loss (DEAL_REASON_SL = 4 ou mention [sl]/[sl xx])
+        if reason == getattr(mt5, 'DEAL_REASON_SL', 4) or "[sl" in comment or " sl" in comment or comment.rstrip().endswith("sl") or comment.lstrip().startswith("sl"):
             return "Stop Loss (SL)"
             
         # 3. Stop Out (DEAL_REASON_SO = 6 ou mention so/stop out)
         if reason == getattr(mt5, 'DEAL_REASON_SO', 6) or "stop out" in comment or "so:" in comment:
             return "Stop Out (Margin Call)"
-            
-        # 4. Clôture Manuelle par l'utilisateur (DEAL_REASON_CLIENT = 0, MOBILE = 1, WEB = 2)
+
+        # 4. Clôture par le Bot/EA (DEAL_REASON_EXPERT = 3 ou commentaire marketshift/expert) — prioritaire
+        #    sur la raison générique 0, car le commentaire de clôture du bot est plus spécifique.
+        if reason == getattr(mt5, 'DEAL_REASON_EXPERT', 3) or "marketshift" in comment or "expert" in comment:
+            return "Expert Advisor (EA)"
+
+        # 5. Clôture Manuelle par l'utilisateur (DEAL_REASON_CLIENT = 0, MOBILE = 1, WEB = 2)
         if reason == getattr(mt5, 'DEAL_REASON_CLIENT', 0) or "client" in comment or "manual" in comment:
             return "Manual / Client"
         if reason == getattr(mt5, 'DEAL_REASON_MOBILE', 1):
             return "Manual / Mobile"
         if reason == getattr(mt5, 'DEAL_REASON_WEB', 2):
             return "Manual / Web"
-            
-        # 5. Clôture par le Bot ou Script (DEAL_REASON_EXPERT = 3 ou commentaire bot)
-        if reason == getattr(mt5, 'DEAL_REASON_EXPERT', 3) or "marketshift" in comment or "expert" in comment:
-            return "Expert Advisor (EA)"
-            
+
         return "Closed / Market"
 
     def _refresh_kelly_history(self):
