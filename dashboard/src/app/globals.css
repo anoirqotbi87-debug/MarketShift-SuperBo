@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #09090b; /* zinc-950 */
+  color: #fafafa;
+  font-family: var(--font-inter), Inter, system-ui, sans-serif;
+  height: 100%;
+}
+
+/* Fine scrollbar Dark Terminal */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* Pulsing live dot : fond + anneau */
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: inherit;
+  animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.card {
+  @apply rounded-xl border border-zinc-800/80 bg-zinc-900/60 backdrop-blur-sm;
+}
+
+/* Flash d'une nouvelle ligne de log */
+@keyframes log-in {
+  0% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.log-line {
+  animation: log-in 0.2s ease-out both;
+}
