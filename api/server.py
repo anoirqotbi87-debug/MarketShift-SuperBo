@@ -443,17 +443,28 @@ def get_ml_latency():
     }
 
 @app.get("/system-health")
-def get_system_health():
+async def get_system_health():
     import psutil
-    import random
-    
-    # Fake MT5 ping for now, as we don't have terminal_info polling set up easily here
-    mt5_ping = 14 + random.uniform(0, 5)
-    
+    import time as _time
+
+    # Latence MT5 reelle : temps d'un fetch symbol_info_tick si le terminal est branche.
+    # Encapsule dans un thread avec timeout 2s pour ne jamais bloquer l'event loop.
+    mt5_ping = None
+    try:
+        connector = getattr(_engine, "connector", None)
+        if connector is not None:
+            async def _measure() -> float:
+                t0 = _time.monotonic()
+                res = await asyncio.to_thread(connector.get_symbol_info, "EURUSD")
+                return round((_time.monotonic() - t0) * 1000, 1) if res is not None else 0.0
+            mt5_ping = await asyncio.wait_for(_measure(), timeout=2.0) or None
+    except Exception:
+        mt5_ping = None
+
     return {
         "time": datetime.datetime.now().strftime("%H:%M:%S"),
-        "latency": round(mt5_ping, 1),
-        "throughput": round(120 + random.uniform(0, 50), 0),
+        "latency": mt5_ping,
+        "throughput": None,
         "cpu_usage": psutil.cpu_percent(interval=None),
         "ram_usage": psutil.virtual_memory().percent
     }
@@ -461,59 +472,32 @@ def get_system_health():
 
 @app.get("/market-depth")
 def get_market_depth(symbol: str = "EURUSD"):
-    import random
+    """
+    Carnet d'ordres réel : prix central réel (bid/ask moyen) ; les niveaux
+    de profondeur ne sont pas exposés par l'API MT5 publique, donc seuls le
+    spread et les meilleurs prix sont retournés — aucune donnée synthétique.
+    """
     if not _engine or not _engine.connector:
-        # Fallback fictif
-        mid = 1.08520
-        step = 0.00010
-    else:
+        raise HTTPException(status_code=503, detail="Terminal MT5 non branché")
+
+    try:
         import MetaTrader5 as mt5
         tick = mt5.symbol_info_tick(symbol)
         if tick is None and "#" in symbol:
             tick = mt5.symbol_info_tick(symbol.replace("#", ""))
-        
-        if tick is not None:
-            mid = (tick.bid + tick.ask) / 2.0
-            info = mt5.symbol_info(symbol) or mt5.symbol_info(symbol.replace("#", ""))
-            step = info.point * 10 if info else 0.00010
-        else:
-            mid = 1.08520
-            step = 0.00010
+        if tick is None:
+            raise HTTPException(status_code=503, detail=f"Symbole {symbol} indisponible")
+        mid = (tick.bid + tick.ask) / 2.0
+        return {
+            "midPrice": round(mid, 5),
+            "bids": [],
+            "asks": []
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail=f"Terminal MT5 indisponible pour {symbol}")
 
-    # Génération synthétique autour du vrai prix (ou mock fallback)
-    bids = []
-    asks = []
-    acc_bid_vol = 0
-    acc_ask_vol = 0
-    
-    for i in range(1, 11):
-        bp = mid - (i * step)
-        ap = mid + (i * step)
-        
-        bv = round(random.uniform(5, 50), 1)
-        av = round(random.uniform(5, 50), 1)
-        
-        acc_bid_vol += bv
-        acc_ask_vol += av
-        
-        bids.append({
-            "price": round(bp, 5),
-            "volume": bv,
-            "totalVolume": round(acc_bid_vol, 1),
-            "ordersCount": random.randint(1, 15)
-        })
-        asks.append({
-            "price": round(ap, 5),
-            "volume": av,
-            "totalVolume": round(acc_ask_vol, 1),
-            "ordersCount": random.randint(1, 15)
-        })
-        
-    return {
-        "midPrice": round(mid, 5),
-        "bids": bids,
-        "asks": asks
-    }
 
 @app.get("/news-events")
 def get_news_events():

@@ -149,7 +149,7 @@ export default function Mt5BridgeView({ snapshot, connected, pingMs, onReconnect
                 value={creds.login}
                 onChange={(e) => setCreds({ ...creds, login: e.target.value })}
                 disabled={locked}
-                placeholder="ex: 50291048"
+                placeholder="ex: 0123456789"
                 className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono text-xs text-zinc-200 focus:border-amber-700 focus:outline-none disabled:opacity-50"
               />
             </label>
