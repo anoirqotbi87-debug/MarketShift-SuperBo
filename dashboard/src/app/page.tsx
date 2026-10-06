@@ -12,6 +12,7 @@ import ConfigPanel from "@/components/ConfigPanel";
 import AnalyticsView from "@/components/AnalyticsView";
 import MlEngineView from "@/components/MlEngineView";
 import Mt5BridgeView from "@/components/Mt5BridgeView";
+import BrokerAccounts from "@/components/BrokerAccounts";
 import LogsView from "@/components/LogsView";
 import RiskMetricsPanel from "@/components/RiskMetricsPanel";
 import KellySizer from "@/components/KellySizer";
@@ -30,6 +31,7 @@ const VIEW_TITLES: Record<DashboardView, string> = {
   backtest: "BACKTEST STUDIO",
   ml: "ML ENGINE",
   mt5: "MT5 BRIDGE",
+  brokers: "COMPTES BROKER",
   config: "CONFIG & RISQUE",
   logs: "TERMINAL LOGS",
 };
@@ -151,6 +153,26 @@ export default function DashboardPage() {
 
             {view === "mt5" && (
               <Mt5BridgeView snapshot={snapshot} connected={connected} pingMs={latencyMs} onReconnect={reconnect} />
+            )}
+
+            {view === "brokers" && (
+              <BrokerAccounts
+                accountInfo={
+                  snapshot.account ?? {
+                    login: 0,
+                    balance: 0,
+                    equity: 0,
+                    freeMargin: 0,
+                    marginLevel: 0,
+                    currency: "USD",
+                    server: "",
+                    broker: "",
+                    isConnected: false,
+                    dailyPnL: 0,
+                    dailyPnLPct: 0,
+                  }
+                }
+              />
             )}
 
             {view === "logs" && <LogsView logs={snapshot.logs ?? []} />}

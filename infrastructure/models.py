@@ -1,6 +1,27 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
 from infrastructure.database import Base
 import datetime
+
+class BrokerAccount(Base):
+    """
+    Compte de courtage enregistré via l'UI "Comptes Broker".
+    Le mot de passe est chiffré (chiffrement symétrique stdlib, clé dérivée
+    de API_SECRET_KEY). Il n'est jamais renvoyé par l'API.
+    """
+    __tablename__ = "broker_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    broker_name = Column(String, default="Custom")
+    server = Column(String, index=True)
+    login = Column(Integer, index=True)
+    password_encrypted = Column(String)
+    account_type = Column(String, default="DEMO")  # "DEMO" | "REAL"
+    is_active = Column(Boolean, default=False)
+    balance = Column(Float, default=0.0)
+    equity = Column(Float, default=0.0)
+    currency = Column(String, default="USD")
+    last_result = Column(String, default="")  # dernier résultat du test/ping
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 class TradeRecord(Base):
     __tablename__ = "trade_records"

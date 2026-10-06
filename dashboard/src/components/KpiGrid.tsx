@@ -33,9 +33,9 @@ export default function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
     maxDrawdownPct > 25 ? "text-rose-400" : maxDrawdownPct > 15 ? "text-orange-400" : "text-emerald-400";
 
   const marginUsedPct =
-    account.equity > 0 ? Math.min(100, ((account.balance - account.freeMargin) / account.equity) * 100) : 0;
+    account && account.equity > 0 ? Math.min(100, ((account.balance - account.freeMargin) / account.equity) * 100) : 0;
 
-  const dailyPnL = account.dailyPnL ?? 0;
+  const dailyPnL = account?.dailyPnL ?? 0;
   const unrealized = snapshot.positions.reduce((acc, p) => acc + p.pnl, 0);
   const dailyColor = dailyPnL >= 0 ? "text-emerald-400" : "text-rose-400";
 
@@ -45,8 +45,8 @@ export default function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
   const cards = [
     {
       label: "Solde",
-      value: fmtUsd(account.balance),
-      sub: `Équité ${fmtUsd(account.equity)}`,
+      value: fmtUsd(account?.balance ?? 0),
+      sub: `Équité ${fmtUsd(account?.equity ?? 0)}`,
       icon: <Wallet className="h-4 w-4 text-cyan-400" />,
       accent: "text-zinc-100",
       gauge: marginUsedPct,
@@ -54,7 +54,7 @@ export default function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
     {
       label: "P&L Journalier",
       value: `${dailyPnL >= 0 ? "+" : ""}${fmtUsd(dailyPnL)}`,
-      sub: `${account.dailyPnLPct >= 0 ? "+" : ""}${fmtUsd(dailyPnL)} (${account.dailyPnLPct.toFixed(2)}%)`,
+      sub: `${(account?.dailyPnLPct ?? 0) >= 0 ? "+" : ""}${fmtUsd(dailyPnL)} (${(account?.dailyPnLPct ?? 0).toFixed(2)}%)`,
       icon: dailyPnL >= 0 ? <TrendingUp className="h-4 w-4 text-emerald-400" /> : <TrendingDown className="h-4 w-4 text-rose-400" />,
       accent: dailyColor,
     },

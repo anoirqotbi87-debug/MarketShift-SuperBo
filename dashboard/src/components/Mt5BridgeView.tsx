@@ -57,8 +57,8 @@ export default function Mt5BridgeView({ snapshot, connected, pingMs, onReconnect
           </div>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <BridgeStat label="Compte" value={account.broker ? `${account.broker} · ${account.login}` : "—"} />
-            <BridgeStat label="Serveur" value={account.server || "—"} small />
+            <BridgeStat label="Compte" value={account?.broker ? `${account.broker} · ${account.login}` : "—"} />
+            <BridgeStat label="Serveur" value={account?.server || "—"} small />
             <BridgeStat
               label="Latence WS"
               value={pingMs !== null ? `${pingMs} ms` : "—"}
@@ -66,7 +66,7 @@ export default function Mt5BridgeView({ snapshot, connected, pingMs, onReconnect
             />
             <BridgeStat
               label="Fonds"
-              value={`$${account.balance.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}`}
+              value={`$${(account?.balance ?? 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}`}
               accent="text-cyan-400"
             />
           </div>

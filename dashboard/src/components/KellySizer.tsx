@@ -29,7 +29,7 @@ export default function KellySizer({ snapshot }: KellySizerProps) {
   }, []);
 
   const size = useMemo<KellyPositionSize | null>(() => {
-    const balance = snapshot.account.balance || 10000;
+    const balance = snapshot.account?.balance || 10000;
     const kellyPct = (kelly?.kellyPct ?? 0) || 25;
 
     // Hypothèse pip value standard pour les paires forexs (approx).

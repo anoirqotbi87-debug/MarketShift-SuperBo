@@ -58,7 +58,7 @@ export default function Header({
   };
 
   const brokerLabel =
-    account.broker === "XM" ? "XMGlobal-MT5" : account.broker === "EXNESS" ? "Exness-MT5" : account.server;
+    account?.broker === "XM" ? "XMGlobal-MT5" : account?.broker === "EXNESS" ? "Exness-MT5" : (account?.server || "—");
 
   return (
     <header className="card relative z-50 flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
