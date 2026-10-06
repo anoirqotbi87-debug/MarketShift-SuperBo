@@ -43,6 +43,7 @@ export interface BrokerTestResult {
   leverage?: number;
   currency?: string;
   error?: string;
+  note?: string;
 }
 
 export interface BrokerConnectResponse {

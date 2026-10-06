@@ -130,6 +130,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   }
 }
 
+/**
+ * Requête POST JSON avec un timeout client strict (AbortController).
+ * Le bouton ne tourne JAMAIS indéfiniment même si le backend ne répond pas.
+ */
+async function requestWithTimeout<T>(
+  path: string,
+  body: unknown,
+  timeoutMs = 3000,
+): Promise<T | null> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${currentApiUrl}${path}`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function fetchServerStatus(): Promise<ServerStatus | null> {
   return request<ServerStatus>("/status");
 }
@@ -332,7 +362,8 @@ export async function fetchBrokerAccounts(): Promise<BrokerAccount[]> {
 }
 
 /**
- * Teste une connexion MT5 (server/login/password) auprès du backend avec un timeout strict.
+ * Teste une connexion MT5 (server/login/password) auprès du backend.
+ * Timeout client strict (3s) — le bouton ne tourne jamais indéfiniment.
  * Le mot de passe transite uniquement chiffré (TLS), jamais stocké côté frontend.
  */
 export async function testBrokerConnection(params: {
@@ -340,13 +371,10 @@ export async function testBrokerConnection(params: {
   login: number;
   password: string;
 }): Promise<BrokerTestResult | null> {
-  return request<BrokerTestResult>("/brokers/test-connection", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+  return requestWithTimeout<BrokerTestResult>("/brokers/test-connection", params);
 }
 
-/** Teste puis enregistre un compte (persistance chiffrée côté backend). */
+/** Enregistre un compte (persistance chiffrée côté backend), timeout client strict 3s. */
 export async function connectBrokerAccount(params: {
   server: string;
   login: number;
@@ -354,10 +382,7 @@ export async function connectBrokerAccount(params: {
   broker_name: string;
   account_type: "DEMO" | "REAL";
 }): Promise<BrokerConnectResponse | null> {
-  return request<BrokerConnectResponse>("/brokers/connect", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+  return requestWithTimeout<BrokerConnectResponse>("/brokers/connect", params);
 }
 
 /** Bascule à chaud le bot sur le compte donné. */
