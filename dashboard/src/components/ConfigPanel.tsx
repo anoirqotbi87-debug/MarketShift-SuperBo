@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, Settings2 } from "lucide-react";
+import { Loader2, Newspaper, Save, Settings2 } from "lucide-react";
 import { fetchKelly, fetchSettings, updateSettings } from "@/lib/api";
 import type { KellyApiResponse, RuntimeSettings } from "@/types/trading";
+
+const NEWS_FILTER_KEY = "marketshift.news_filter";
 
 const DEFAULT_SETTINGS: RuntimeSettings = {
   sl_multiplier: 2.0,
@@ -53,6 +55,8 @@ export default function ConfigPanel() {
   const [saved, setSaved] = useState(false);
   const [smcWeight, setSmcWeight] = useState(0.5);
   const [amdWeight, setAmdWeight] = useState(0.5);
+  const [newsFilterEnabled, setNewsFilterEnabled] = useState(true);
+  const [minNewsScore, setMinNewsScore] = useState(-0.6);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +69,31 @@ export default function ConfigPanel() {
       cancelled = true;
     };
   }, []);
+
+  // Préférences news filtrées persistées localement (non-backend).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(NEWS_FILTER_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setNewsFilterEnabled(parsed.enabled !== false);
+        setMinNewsScore(typeof parsed.minScore === "number" ? parsed.minScore : -0.6);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        NEWS_FILTER_KEY,
+        JSON.stringify({ enabled: newsFilterEnabled, minScore: minNewsScore }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [newsFilterEnabled, minNewsScore]);
 
   const save = async () => {
     setSaving(true);
@@ -207,6 +236,46 @@ export default function ConfigPanel() {
           <p className="text-zinc-400">W0 = {smcWeight.toFixed(1)} · W1 = {amdWeight.toFixed(1)}</p>
           <p className="mt-1">Signal = SMC×{smcWeight.toFixed(1)} + AMD×{amdWeight.toFixed(1)}</p>
         </div>
+      </section>
+
+      {/* Filtre actualités / sentiment (parité interface 5173) */}
+      <section className="card p-4 xl:col-span-2">
+        <h3 className="mb-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
+          <Newspaper className="h-4 w-4 text-cyan-400" /> Filtre Actualités / Sentiment
+        </h3>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={newsFilterEnabled}
+              onChange={(e) => setNewsFilterEnabled(e.target.checked)}
+              className="h-4 w-4 accent-cyan-500"
+            />
+            Activer le filtre de sentiment (blocage trades contre-news)
+          </label>
+          <label className="flex items-center gap-3">
+            <span className="min-w-24 text-[10px] uppercase tracking-wider text-zinc-500">
+              Score min. news
+            </span>
+            <input
+              type="range"
+              min="-1"
+              max="0"
+              step="0.05"
+              disabled={!newsFilterEnabled}
+              value={minNewsScore}
+              onChange={(e) => setMinNewsScore(Number(e.target.value))}
+              className="flex-1 accent-cyan-500 disabled:opacity-40"
+            />
+            <span className="w-14 text-right font-mono text-xs text-zinc-300">
+              {minNewsScore.toFixed(2)}
+            </span>
+          </label>
+        </div>
+        <p className="mt-3 text-[10px] leading-relaxed text-zinc-600">
+          Les signaux ML dont le score de sentiment news est inférieur à ce seuil sont bloqués
+          (rejet par le PreTradeValidator). Persisté localement — non propagé au backend.
+        </p>
       </section>
 
       {/* Barre de sauvegarde */}
