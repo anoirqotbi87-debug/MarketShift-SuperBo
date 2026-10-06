@@ -40,6 +40,7 @@ export interface BrokerTestResult {
   ping_ms?: number;
   balance?: number;
   equity?: number;
+  leverage?: number;
   currency?: string;
   error?: string;
 }

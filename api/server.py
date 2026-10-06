@@ -1447,6 +1447,7 @@ def _broker_test_connection_sync(server: str, login: int, password: str) -> dict
             "ping_ms": ping_ms,
             "balance": float(info.balance),
             "equity": float(info.equity),
+            "leverage": int(getattr(info, "leverage", 0) or 0),
             "currency": getattr(info, "currency", "USD"),
         }
     except Exception as e:
