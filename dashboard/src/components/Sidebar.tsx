@@ -3,14 +3,26 @@
 import {
   Activity,
   BarChart3,
+  BrainCircuit,
   GaugeCircle,
+  LineChart,
   PanelLeftClose,
   PanelLeftOpen,
+  Radio,
   Settings2,
+  SquareTerminal,
   X,
 } from "lucide-react";
 
-export type DashboardView = "live" | "grid" | "backtest" | "config";
+export type DashboardView =
+  | "live"
+  | "grid"
+  | "backtest"
+  | "config"
+  | "analytics"
+  | "ml"
+  | "mt5"
+  | "logs";
 
 interface SidebarProps {
   view: DashboardView;
@@ -23,9 +35,13 @@ interface SidebarProps {
 
 const NAV_ITEMS: Array<{ id: DashboardView; label: string; icon: typeof Activity }> = [
   { id: "live", label: "Live Monitoring", icon: Activity },
+  { id: "analytics", label: "Analytics", icon: LineChart },
   { id: "grid", label: "Grid Search", icon: GaugeCircle },
   { id: "backtest", label: "Backtest Studio", icon: BarChart3 },
+  { id: "ml", label: "ML Engine", icon: BrainCircuit },
+  { id: "mt5", label: "MT5 Bridge", icon: Radio },
   { id: "config", label: "Stratégies & Risque", icon: Settings2 },
+  { id: "logs", label: "Terminal Logs", icon: SquareTerminal },
 ];
 
 export default function Sidebar({

@@ -247,3 +247,112 @@ export interface ConnectionProfile {
   apiUrl: string;
   wsUrl: string;
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Analytique avancée (endpoints backend /ml-latency, /system-health, /market-depth,
+// /news-events, /ml/status, /predict, /market-overview, /benchmark-curve, /history)
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface MlLatencyPoint {
+  time: string;
+  latencyMs: number;
+  preprocessMs: number;
+  onnxInferenceMs: number;
+  postprocessMs: number;
+  batchSize: number;
+}
+
+export interface SystemHealth {
+  time: string;
+  latency: number;
+  throughput: number;
+  cpu_usage: number;
+  ram_usage: number;
+}
+
+export interface MarketDepthLevel {
+  price: number;
+  volume: number;
+  totalVolume: number;
+  ordersCount: number;
+}
+
+export interface MarketDepthData {
+  midPrice: number;
+  bids: MarketDepthLevel[];
+  asks: MarketDepthLevel[];
+}
+
+export interface NewsEvent {
+  id: string;
+  time: string;
+  headline: string;
+  sentimentScore: number;
+  actionTaken: string;
+  severity: "NORMAL" | "WARNING" | "CRITICAL";
+}
+
+export interface MlStatus {
+  trained: boolean;
+  accuracy: number;
+  sampleCount: number;
+  lastTrained: string;
+  confidenceThreshold: number;
+  featureImportances: Array<{ feature: string; importance: number }>;
+  retrainIntervalHours: number;
+}
+
+export interface PredictResponse {
+  signal: "BUY" | "SELL" | "WAIT" | "HOLD";
+  confidence: number;
+  reason?: string;
+  featureImportances?: Array<{ feature: string; importance: number }>;
+  mlTrained?: boolean;
+  error?: string;
+}
+
+export interface MarketOverviewEntry {
+  symbol: string;
+  price: number;
+  changeUsd: number;
+  changePct: number;
+  high24h: number;
+  low24h: number;
+  volume: number;
+  signal?: "BUY" | "SELL" | "NEUTRAL" | "WAIT";
+}
+
+export interface BenchmarkPoint {
+  time: string;
+  benchmarkEquity: number;
+}
+
+export interface HistoryBar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  tickVolume: number;
+}
+
+/** GTK / widget de positionnement Kelly enrichi (calculs côté client). */
+export interface KellyPositionSize {
+  kellyPct: number;
+  riskPct: number;
+  positionSize: number;
+  lots: number;
+  pipValuePerLot: number;
+  accountBalance: number;
+}
+
+export interface PriceAlertItem {
+  id: string;
+  symbol: string;
+  condition: "ABOVE" | "BELOW";
+  targetPrice: number;
+  note?: string;
+  enabled: boolean;
+  isTriggered: boolean;
+  createdAt: string;
+}

@@ -2,17 +2,26 @@ import type {
   ApplySettingsPayload,
   ApplySettingsResponse,
   BacktestReport,
+  BenchmarkPoint,
   ConnectionProfile,
   EquityPoint,
+  HistoryBar,
   KellyApiResponse,
   KpiMetrics,
+  MarketDepthData,
+  MarketOverviewEntry,
+  MlLatencyPoint,
+  MlStatus,
+  NewsEvent,
   OptimizeJobResponse,
   OptimizeJobStatus,
+  PredictResponse,
   RestPosition,
   RuntimeSettings,
   ServerStatus,
   SettingsPatch,
   SymbolOverview,
+  SystemHealth,
 } from "@/types/trading";
 
 /**
@@ -234,4 +243,76 @@ export async function runBacktest(params: {
   } catch {
     return null;
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Analytique avancée — endpoints observabilité / temps réel
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function fetchMlLatency(): Promise<MlLatencyPoint | null> {
+  return request<MlLatencyPoint>("/ml-latency");
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealth | null> {
+  return request<SystemHealth>("/system-health");
+}
+
+export async function fetchMarketDepth(symbol = "EURUSD"): Promise<MarketDepthData | null> {
+  return request<MarketDepthData>(`/market-depth?symbol=${encodeURIComponent(symbol)}`);
+}
+
+export async function fetchNewsEvents(): Promise<NewsEvent[]> {
+  const data = await request<NewsEvent[]>("/news-events");
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchMlStatus(): Promise<MlStatus | null> {
+  return request<MlStatus>("/ml/status");
+}
+
+export async function fetchPredict(symbol = "EURUSD"): Promise<PredictResponse | null> {
+  return request<PredictResponse>(`/predict?symbol=${encodeURIComponent(symbol)}`);
+}
+
+export async function fetchMarketOverview(): Promise<MarketOverviewEntry[]> {
+  const data = await request<MarketOverviewEntry[]>("/market-overview");
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchBenchmarkCurve(
+  timeframe = "1M",
+  asset = "BASKET_TOP5",
+): Promise<BenchmarkPoint[]> {
+  const data = await request<BenchmarkPoint[]>(
+    `/benchmark-curve?timeframe=${encodeURIComponent(timeframe)}&asset=${encodeURIComponent(asset)}`,
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function fetchHistory(symbol = "EURUSD", timeframe = "M15", bars = 200): Promise<HistoryBar[]> {
+  const data = await request<HistoryBar[]>(
+    `/history?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&num_bars=${bars}`,
+  );
+  return Array.isArray(data) ? data : [];
+}
+
+export async function retrainMlModel(): Promise<{ status?: string; error?: string } | null> {
+  try {
+    const res = await fetch(`${currentApiUrl}/ml/retrain`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+      },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { status?: string; error?: string };
+  } catch {
+    return null;
+  }
+}
+
+/** Récupère l'historique MT5 /export-history (ouvre un téléchargement). */
+export function exportHistoryUrl(symbol: string, timeframe = "M15", numBars = 50000): string {
+  return `${currentApiUrl}/export-history?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&num_bars=${numBars}`;
 }

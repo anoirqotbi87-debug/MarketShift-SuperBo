@@ -9,6 +9,13 @@ import TelemetryConsole from "@/components/TelemetryConsole";
 import GridSearch from "@/components/GridSearch";
 import BacktestStudio from "@/components/BacktestStudio";
 import ConfigPanel from "@/components/ConfigPanel";
+import AnalyticsView from "@/components/AnalyticsView";
+import MlEngineView from "@/components/MlEngineView";
+import Mt5BridgeView from "@/components/Mt5BridgeView";
+import LogsView from "@/components/LogsView";
+import RiskMetricsPanel from "@/components/RiskMetricsPanel";
+import KellySizer from "@/components/KellySizer";
+import PriceAlerts from "@/components/PriceAlerts";
 import Sidebar, { type DashboardView } from "@/components/Sidebar";
 import { fetchEquityCurve, fetchKpiMetrics } from "@/lib/api";
 import { useMarketShiftWS } from "@/hooks/useMarketShiftWS";
@@ -18,9 +25,13 @@ const POLL_MS = 10000;
 
 const VIEW_TITLES: Record<DashboardView, string> = {
   live: "LIVE MONITORING",
+  analytics: "ANALYTICS",
   grid: "GRID SEARCH",
   backtest: "BACKTEST STUDIO",
+  ml: "ML ENGINE",
+  mt5: "MT5 BRIDGE",
   config: "CONFIG & RISQUE",
+  logs: "TERMINAL LOGS",
 };
 
 export default function DashboardPage() {
@@ -120,8 +131,29 @@ export default function DashboardPage() {
             )}
 
             {view === "grid" && <GridSearch />}
+
             {view === "backtest" && <BacktestStudio />}
-            {view === "config" && <ConfigPanel />}
+
+            {view === "config" && (
+              <>
+                <RiskMetricsPanel snapshot={snapshot} equityCurve={equity1D} />
+                <ConfigPanel />
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <KellySizer snapshot={snapshot} />
+                  <PriceAlerts />
+                </div>
+              </>
+            )}
+
+            {view === "analytics" && <AnalyticsView snapshot={snapshot} />}
+
+            {view === "ml" && <MlEngineView />}
+
+            {view === "mt5" && (
+              <Mt5BridgeView snapshot={snapshot} connected={connected} pingMs={latencyMs} onReconnect={reconnect} />
+            )}
+
+            {view === "logs" && <LogsView logs={snapshot.logs ?? []} />}
           </div>
         </main>
       </div>
