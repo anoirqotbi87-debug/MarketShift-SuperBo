@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional
 from core.interfaces import Signal, OrderType, AccountInfo
+from infrastructure.config import Config
 from strategies.smc_ict import SMCStrategy
 from application.position_sizer import PositionSizer
 from ml.trainer import MLTrainer
@@ -42,8 +43,8 @@ class Backtester:
         self.closed_trades: List[dict] = []
         self.equity_curve: List[float] = []
         
-        # Le seuil ML par défaut est 0.60
-        self.predictor.set_confidence_threshold(0.60)
+        # Seuil ML par défaut = Config (0.58 calibré sur l'accuracy modèle ~62.7%)
+        self.predictor.set_confidence_threshold(Config.ML_CONFIDENCE_THRESHOLD)
         
     def run(self, df: pd.DataFrame, symbol: str) -> dict:
         logging.info(f"[Backtester] Lancement de la simulation sur {symbol} ({len(df)} bougies)...")

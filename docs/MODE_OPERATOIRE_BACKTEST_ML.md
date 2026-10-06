@@ -28,4 +28,4 @@ Le modèle Machine Learning (XGBoost/LightGBM) n'est **jamais utilisé pour gén
 1. La stratégie mathématique (ex: RSI) génère un signal d'Achat.
 2. Le signal est passé au modèle ML.
 3. Le modèle ML évalue la probabilité de succès en fonction des 10 dernières bougies, de la volatilité et de l'heure de la journée.
-4. Si la confiance ML est `< 0.75` (défini dans `.env`), le trade est **bloqué**.
+4. Si la confiance ML est `< 0.58` (défaut calibré sur l'accuracy du modèle ~62.7%, surchargeable dans `.env` via `ML_CONFIDENCE_THRESHOLD`), le trade est **bloqué**.

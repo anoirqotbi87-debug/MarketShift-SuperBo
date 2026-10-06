@@ -85,9 +85,12 @@ class NewsFilter:
         """
         if not self.news_events:
             return False
-            
+
         now = datetime.now(timezone.utc)
-        
+        logging.debug(
+            f"[NewsFilter] [{symbol}] Contrôle embargo news: {len(self.news_events)} "
+            f"annonces High Impact en mémoire, fenêtre ±{self.pause_before.seconds//60}m."
+        )
         # Extraire les devises du symbole (ex: EURUSD -> EUR, USD / BTCUSD -> USD)
         currencies_to_check = []
         if "USD" in symbol: currencies_to_check.append("USD")
