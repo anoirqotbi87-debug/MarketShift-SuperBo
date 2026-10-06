@@ -17,6 +17,45 @@ export interface AccountInfo {
   dailyPnLPct: number;
 }
 
+export type BrokerAccountType = "DEMO" | "REAL";
+
+/** Compte de courtage enregistré (mot de passe JAMAIS exposé côté API). */
+export interface BrokerAccount {
+  id: number;
+  broker_name: string;
+  server: string;
+  login: number;
+  account_type: BrokerAccountType;
+  is_active: boolean;
+  balance: number;
+  equity: number;
+  currency: string;
+  last_result: string;
+  password_set: boolean;
+}
+
+/** Résultat d'un test de connexion MT5 réel. */
+export interface BrokerTestResult {
+  success: boolean;
+  ping_ms?: number;
+  balance?: number;
+  equity?: number;
+  currency?: string;
+  error?: string;
+}
+
+export interface BrokerConnectResponse {
+  success: boolean;
+  account?: BrokerAccount;
+  error?: string;
+}
+
+export interface BrokerSwitchResponse {
+  success: boolean;
+  account?: BrokerAccount;
+  error?: string;
+}
+
 export interface WsPosition {
   ticket: number;
   symbol: string;

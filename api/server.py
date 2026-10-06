@@ -26,6 +26,9 @@ from pydantic import BaseModel
 from infrastructure.config import Config
 from application.engine import Engine
 from core.interfaces import OrderType
+from infrastructure.database import SessionLocal, get_db
+from infrastructure.credential_vault import encrypt_secret, decrypt_secret
+from infrastructure import models  # noqa: F401  — enregistre les tables SQLAlchemy (create_all)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger en mémoire — stocke les 200 derniers logs
@@ -1351,3 +1354,338 @@ def get_market_overview():
     except Exception as e:
         logging.error(f"[API] Erreur /market-overview: {e}")
         return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Comptes Broker — Gestion & Connexion Directe Multi-Comptes
+# ─────────────────────────────────────────────────────────────────────────────
+# Registre en mémoire des comptes de courtage. Persistance SQLite (chiffrée pour
+# le mot de passe). Le mot de passe n'est JAMAIS renvoyé par l'API.
+# ─────────────────────────────────────────────────────────────────────────────
+
+MT5_CONNECT_TIMEOUT = 4.0  # Seuil strict anti-freeze : jamais bloquer la boucle > 4s
+
+
+class BrokerConnectRequest(BaseModel):
+    server: str
+    login: int
+    password: str
+    broker_name: str = "Custom"
+    account_type: str = "DEMO"
+
+
+class BrokerTestRequest(BaseModel):
+    server: str
+    login: int
+    password: str
+
+
+class BrokerSwitchRequest(BaseModel):
+    account_id: int
+
+
+def _broker_public_dict(acc) -> dict:
+    """Sérialise un compte BrokerAccount sans jamais exposer le mot de passe."""
+    return {
+        "id":            acc.id,
+        "broker_name":   acc.broker_name,
+        "server":        acc.server,
+        "login":         acc.login,
+        "account_type":  acc.account_type,
+        "is_active":     bool(acc.is_active),
+        "balance":       acc.balance,
+        "equity":        acc.equity,
+        "currency":      acc.currency,
+        "last_result":   acc.last_result,
+        "password_set":  bool(acc.password_encrypted),
+    }
+
+
+def _load_broker_accounts() -> List[dict]:
+    """Charge les comptes persistés SQLite en mémoire (sans mot de passe)."""
+    try:
+        db = SessionLocal()
+        try:
+            from infrastructure.models import BrokerAccount
+            accs = db.query(BrokerAccount).order_by(BrokerAccount.id).all()
+            return [_broker_public_dict(a) for a in accs]
+        finally:
+            db.close()
+    except Exception as e:
+        logging.error(f"[Broker] Erreur chargement comptes: {e}")
+        return []
+
+
+def _broker_test_connection_sync(server: str, login: int, password: str) -> dict:
+    """
+    Teste une connexion MT5 de manière SYNCHRONE (appelée via asyncio.to_thread).
+    Retourne toujours un dict (jamais d'exception) pour éviter tout freeze.
+    """
+    try:
+        import MetaTrader5 as mt5
+        if mt5 is None:  # fallback import résilient renvoie None sur Linux
+            return {"success": False, "error": "MetaTrader5 indisponible (package Windows-only) sur cet environnement"}
+    except ImportError:
+        return {"success": False, "error": "MetaTrader5 indisponible (package Windows-only' non installable sur ce système de trading)"}
+
+    try:
+        t0 = time.time()
+        # shutdown pour ne pas interférer avec une session active
+        try:
+            mt5.shutdown()
+        except Exception:
+            pass
+
+        if login > 0 and password and server:
+            init_ok = mt5.initialize(login=login, password=password, server=server)
+        else:
+            init_ok = mt5.initialize()
+
+        if not init_ok:
+            err = mt5.last_error() if hasattr(mt5, "last_error") else None
+            return {
+                "success": False,
+                "ping_ms": round((time.time() - t0) * 1000, 1),
+                "error": f"MT5 initialization failed: {err}",
+            }
+
+        info = mt5.account_info()
+        ping_ms = round((time.time() - t0) * 1000, 1)
+        if info is None:
+            return {
+                "success": True,
+                "ping_ms": ping_ms,
+                "balance": 0.0,
+                "error": "Connecté mais account_info indisponible",
+            }
+        return {
+            "success": True,
+            "ping_ms": ping_ms,
+            "balance": float(info.balance),
+            "equity": float(info.equity),
+            "currency": getattr(info, "currency", "USD"),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def _broker_test_connection(server: str, login: int, password: str) -> dict:
+    """Version async avec timeout strict de 4s (jamais bloquant pour l'Engine)."""
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_broker_test_connection_sync, server, login, password),
+            timeout=MT5_CONNECT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        logging.warning(f"[Broker] Timeout {MT5_CONNECT_TIMEOUT}s sur test connexion MT5 (server={server}, login={login})")
+        return {
+            "success": False,
+            "ping_ms": MT5_CONNECT_TIMEOUT * 1000,
+            "error": f"Timeout après {MT5_CONNECT_TIMEOUT}s (MT5 ne répond pas)",
+        }
+
+
+@app.get("/brokers/accounts")
+async def list_broker_accounts(api_key: str = Depends(verify_api_key)):
+    """Liste les comptes enregistrés (jamais le mot de passe)."""
+    return _load_broker_accounts()
+
+
+@app.post("/brokers/test-connection")
+async def test_broker_connection(req: BrokerTestRequest, api_key: str = Depends(verify_api_key)):
+    """Teste l'authentification MT5 (server/login/password) avec timeout strict 4s."""
+    result = await _broker_test_connection(req.server, req.login, req.password)
+    logging.info(f"[Broker] Test connexion server={req.server} login={req.login} -> success={result.get('success')}")
+    return result
+
+
+@app.post("/brokers/connect")
+async def connect_broker_account(req: BrokerConnectRequest, api_key: str = Depends(verify_api_key)):
+    """
+    Teste la connexion puis enregistre le compte (persistance chiffrée).
+    Si aucun compte actif n'existe, le nouveau compte devient actif.
+    """
+    # 1. Test réel
+    test = await _broker_test_connection(req.server, req.login, req.password)
+    if not test.get("success"):
+        return {"success": False, "error": test.get("error", "Connexion MT5 refusée")}
+
+    # 2. Persistance
+    encrypted = encrypt_secret(req.password)
+    db = SessionLocal()
+    try:
+        from infrastructure.models import BrokerAccount
+        acc = BrokerAccount(
+            broker_name=req.broker_name,
+            server=req.server,
+            login=req.login,
+            password_encrypted=encrypted,
+            account_type="REAL" if req.account_type.upper() == "REAL" else "DEMO",
+            balance=float(test.get("balance", 0.0)),
+            equity=float(test.get("equity", 0.0)),
+            currency=test.get("currency", "USD"),
+            last_result=f"OK · {test.get('ping_ms')}ms",
+        )
+        existing = db.query(BrokerAccount).filter(
+            BrokerAccount.server == req.server,
+            BrokerAccount.login == req.login,
+        ).first()
+        if existing:
+            acc = existing
+            acc.balance = float(test.get("balance", 0.0))
+            acc.equity = float(test.get("equity", 0.0))
+            acc.currency = test.get("currency", "USD")
+            acc.last_result = f"OK · {test.get('ping_ms')}ms"
+            acc.password_encrypted = encrypted
+            acc.broker_name = req.broker_name
+            acc.account_type = "REAL" if req.account_type.upper() == "REAL" else "DEMO"
+            db.add(acc)
+
+        # Premier compte => actif
+        active_count = db.query(BrokerAccount).filter(BrokerAccount.is_active == True).count()
+        if active_count == 0:
+            acc.is_active = True
+
+        db.add(acc)
+        db.commit()
+        db.refresh(acc)
+    finally:
+        db.close()
+
+    logging.info(f"[Broker] Compte enregistré: {req.broker_name} {req.server} #{req.login} (type={req.account_type})")
+    return {"success": True, "account": _broker_public_dict(acc)}
+
+
+@app.post("/brokers/switch-active")
+async def switch_active_broker(req: BrokerSwitchRequest, api_key: str = Depends(verify_api_key)):
+    """
+    Bascule à chaud l'Engine sur le compte sélectionné.
+    Reconstruit un BrokerRouter(Primary=compte cible, Fallback=compte .env) et rebranche
+    les références partagées de l'Engine SANS casser la boucle d'exécution principale.
+
+    En cas d'échec de la tentative de connexion, l'état actif précédent est restauré
+    (le compte qui était actif redevient actif).
+    """
+    global _engine
+    if not _engine:
+        raise HTTPException(status_code=503, detail="Engine offline")
+
+    db = SessionLocal()
+    try:
+        from infrastructure.models import BrokerAccount
+        acc = db.query(BrokerAccount).filter(BrokerAccount.id == req.account_id).first()
+        if not acc:
+            raise HTTPException(status_code=404, detail="Compte introuvable")
+
+        password = decrypt_secret(acc.password_encrypted)
+        if not password:
+            raise HTTPException(status_code=500, detail="Impossible de déchiffrer le mot de passe du compte")
+
+        # Mémoriser l'état actuel pour restauration en cas d'échec
+        previous_active_id = None
+        prev_active = db.query(BrokerAccount).filter(BrokerAccount.is_active == True).first()
+        if prev_active:
+            previous_active_id = prev_active.id
+
+        # Valeur locale
+        acc_id = acc.id
+        acc_server = acc.server
+        acc_login = acc.login
+
+        # Marquage actif : seul le compte cible devient actif
+        db.query(BrokerAccount).update({BrokerAccount.is_active: False})
+        acc.is_active = True
+        db.commit()
+        db.refresh(acc)
+    finally:
+        db.close()
+
+    async def _restore_active_state():
+        """Restaure l'état d'activation précédent après un échec."""
+        try:
+            db_r = SessionLocal()
+            try:
+                from infrastructure.models import BrokerAccount
+                db_r.query(BrokerAccount).update({BrokerAccount.is_active: False})
+                if previous_active_id:
+                    prev = db_r.query(BrokerAccount).filter(BrokerAccount.id == previous_active_id).first()
+                    if prev:
+                        prev.is_active = True
+                db_r.commit()
+            finally:
+                db_r.close()
+        except Exception as e:
+            logging.error(f"[Broker] Erreur restauration état: {e}")
+        return None
+
+    # 2. Test de connexion réel (timeout strict)
+    test = await _broker_test_connection(acc_server, acc_login, password)
+    if not test.get("success"):
+        await _restore_active_state()
+        logging.warning(f"[Broker] Switch vers #{acc_login} échoué (test MT5 refusé). État restauré.")
+        return {"success": False, "error": test.get("error", "Échec de connexion MT5")}
+
+    # 3. Reconstruire le routeur avec le compte cible en Primary et le .env en Fallback
+    try:
+        from infrastructure.mt5_connector import MT5Connector
+        from infrastructure.broker_router import BrokerRouter
+
+        target = MT5Connector(acc_login, password, acc_server)
+        login_cfg = 0
+        try:
+            from infrastructure.config import Config
+            login_cfg = int(Config.XM_LOGIN) if Config.XM_LOGIN else 0
+        except Exception:
+            pass
+        fallback = MT5Connector(login_cfg, "", "")
+
+        new_router = BrokerRouter(primary=target, fallback=fallback)
+
+        # Connexion immédiate au primaire (pour appliquer le switch maintenant)
+        if not new_router.connect():
+            await _restore_active_state()
+            logging.warning(f"[Broker] Switch vers #{acc_login} échoué (Router.connect refusé). État restauré.")
+            return {"success": False, "error": "Impossible de se connecter au compte cible (MT5 refusé)"}
+
+        # Rebrancher les références de l'Engine sans modifier l'architecture
+        _engine.connector = new_router
+        if hasattr(_engine, "state_manager") and hasattr(_engine.state_manager, "connector"):
+            _engine.state_manager.connector = new_router
+        if hasattr(_engine, "kill_switch") and hasattr(_engine.kill_switch, "connector"):
+            _engine.kill_switch.connector = new_router
+
+        # Rafraîchir l'état du compte
+        try:
+            _engine.state_manager.update_state()
+        except Exception as e:
+            logging.error(f"[Broker] Erreur refresh state_manager après switch: {e}")
+
+        logging.warning(f"[Broker] 🔄 Engine basculé sur compte #{acc_login} ({acc_server})")
+        return {"success": True, "account": _broker_public_dict(acc)}
+    except Exception as e:
+        await _restore_active_state()
+        logging.error(f"[Broker] Erreur switch-active: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/brokers/accounts/{account_id}")
+async def delete_broker_account(account_id: int, api_key: str = Depends(verify_api_key)):
+    """Supprime un compte enregistré de la base SQLite."""
+    db = SessionLocal()
+    try:
+        from infrastructure.models import BrokerAccount
+        acc = db.query(BrokerAccount).filter(BrokerAccount.id == account_id).first()
+        if not acc:
+            raise HTTPException(status_code=404, detail="Compte introuvable")
+        was_active = acc.is_active
+        db.delete(acc)
+        db.commit()
+        if was_active:
+            # Rendre le premier compte restant actif si l'actif a été supprimé
+            remaining = db.query(BrokerAccount).order_by(BrokerAccount.id).first()
+            if remaining:
+                remaining.is_active = True
+                db.commit()
+        return {"success": True}
+    finally:
+        db.close()
