@@ -5,6 +5,7 @@ import {
   Activity,
   Ban,
   CircleOff,
+  Menu,
   Play,
   Power,
   RefreshCcw,
@@ -15,15 +16,27 @@ import {
 import { sendControlCommand } from "@/lib/api";
 import type { WsSnapshot } from "@/types/trading";
 import EmergencyModal from "./EmergencyModal";
+import ConnectionSwitcher from "./ConnectionSwitcher";
 
 interface HeaderProps {
   snapshot: WsSnapshot;
   connected: boolean;
   latencyMs: number | null;
   symbolsCount: number | null;
+  onReconnect: () => void;
+  onOpenMenu?: () => void;
+  title?: string;
 }
 
-export default function Header({ snapshot, connected, latencyMs, symbolsCount }: HeaderProps) {
+export default function Header({
+  snapshot,
+  connected,
+  latencyMs,
+  symbolsCount,
+  onReconnect,
+  onOpenMenu,
+  title,
+}: HeaderProps) {
   const [showEmergency, setShowEmergency] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -51,6 +64,15 @@ export default function Header({ snapshot, connected, latencyMs, symbolsCount }:
     <header className="card flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
       {/* Marque + état WS */}
       <div className="flex items-center gap-3">
+        {onOpenMenu && (
+          <button
+            onClick={onOpenMenu}
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 lg:hidden"
+            aria-label="Ouvrir le menu"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        )}
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
           <Activity className="h-5 w-5 text-emerald-400" />
         </div>
@@ -58,7 +80,7 @@ export default function Header({ snapshot, connected, latencyMs, symbolsCount }:
           <h1 className="text-sm font-semibold tracking-wide text-zinc-100">
             MarketShift
             <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] font-medium text-zinc-400">
-              SUPERVERBOT
+              {title ?? "SUPERVERBOT"}
             </span>
           </h1>
           <div className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500">
@@ -108,6 +130,7 @@ export default function Header({ snapshot, connected, latencyMs, symbolsCount }:
 
       {/* Commandes de sécurité */}
       <div className="flex items-center gap-2">
+        <ConnectionSwitcher connected={connected} onReconnect={onReconnect} />
         {actionMsg && <span className="text-[11px] text-zinc-500">{actionMsg}</span>}
         {isPaused ? (
           <button
