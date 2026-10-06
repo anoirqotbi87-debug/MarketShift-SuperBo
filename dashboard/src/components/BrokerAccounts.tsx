@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  ExternalLink,
   Landmark,
   Loader2,
   Plus,
@@ -68,48 +69,16 @@ function toCard(acc: BrokerAccount): AccountCard {
   };
 }
 
-/** Convertit les cartes locales en comptes backend si le fetch échoue (mode démo). */
-const DEMO_ACCOUNTS: BrokerAccount[] = [
-  {
-    id: 1,
-    broker_name: "XM Global",
-    server: "XMGlobal-MT5 9",
-    login: 50291048,
-    account_type: "DEMO",
-    is_active: true,
-    balance: 50210.5,
-    equity: 50780.12,
-    currency: "USD",
-    last_result: "OK · 12ms",
-    password_set: true,
-  },
-  {
-    id: 2,
-    broker_name: "Exness",
-    server: "Exness-Real",
-    login: 983421,
-    account_type: "REAL",
-    is_active: false,
-    balance: 12500.0,
-    equity: 12380.4,
-    currency: "USD",
-    last_result: "OK · 34ms",
-    password_set: true,
-  },
-  {
-    id: 3,
-    broker_name: "IC Markets",
-    server: "ICMarkets-Live",
-    login: 7410258,
-    account_type: "REAL",
-    is_active: false,
-    balance: 0,
-    equity: 0,
-    currency: "USD",
-    last_result: "Échec auth · 41ms",
-    password_set: true,
-  },
-];
+/**
+ * URL officielle du WebTrader MT5 selon le courtier.
+ * Fallback MetaQuotes : pré-remplit la connexion avec le serveur/login.
+ */
+export function getWebTraderUrl(brokerName: string, server: string, login: number): string {
+  const name = brokerName.toLowerCase();
+  if (name.includes("xm")) return "https://webtrader.xm.com/";
+  if (name.includes("exness")) return "https://my.exness.com/webtrading/";
+  return `https://trade.mql5.com/trade?servers=${encodeURIComponent(server)}&trade_server=${encodeURIComponent(server)}&login=${encodeURIComponent(String(login))}`;
+}
 
 /**
  * Vue "Comptes Broker" — gestion multi-comptes MT5 (connexion, bascule, test).
@@ -132,17 +101,11 @@ export default function BrokerAccounts({ accountInfo }: BrokerAccountsProps) {
     if (!silent) setLoading(true);
     try {
       const list = await fetchBrokerAccounts();
-      if (!list || list.length === 0) {
-        // Backend injoignable ou aucune donnée : bascule en mode démo interactif
-        setBackendUp(false);
-        setAccounts(DEMO_ACCOUNTS.map(toCard));
-      } else {
-        setBackendUp(true);
-        setAccounts(list.map(toCard));
-      }
+      setBackendUp(true);
+      setAccounts((list || []).map(toCard));
     } catch {
       setBackendUp(false);
-      setAccounts(DEMO_ACCOUNTS.map(toCard));
+      setAccounts([]);
     } finally {
       setLoading(false);
     }
@@ -215,7 +178,7 @@ export default function BrokerAccounts({ accountInfo }: BrokerAccountsProps) {
             }`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${backendUp ? "bg-emerald-400" : "bg-amber-400"}`} />
-            {backendUp ? "BACKEND OK" : "MODE DÉMO"}
+            {backendUp ? "BACKEND OK" : "BACKEND INJOIGNABLE"}
           </span>
         </div>
 
@@ -283,10 +246,13 @@ export default function BrokerAccounts({ accountInfo }: BrokerAccountsProps) {
       ) : accounts.length === 0 ? (
         <div className="card flex flex-col items-center justify-center gap-3 p-10 text-center">
           <Building2 className="h-8 w-8 text-zinc-600" />
-          <p className="text-sm text-zinc-400">Aucun compte enregistré.</p>
+          <p className="text-sm text-zinc-400">
+            Aucun compte broker configuré. Cliquez sur «&nbsp;+ Connecter un compte&nbsp;» pour lier
+            votre compte de trading réel.
+          </p>
           <p className="max-w-md text-xs leading-relaxed text-zinc-600">
-            Ajoutez votre compte MT5 (XM, Exness, IC Markets…) pour permettre au bot de s'y
-            connecter et d'y diriger ses ordres. Le mot de passe est chiffré côté backend.
+            Le bot s&apos;appuie sur le compte XM défini dans l&apos;environnement tant qu&apos;aucun
+            compte n&apos;est ajouté ici. Le mot de passe est chiffré côté backend et jamais restitué.
           </p>
           <button
             onClick={() => setModalOpen(true)}
@@ -427,7 +393,7 @@ function AccountCardView({
         <MiniStat label="Dernier test" value={card.lastResult || "—"} accent="text-amber-300" />
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {card.isActive ? (
           <span className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-emerald-800 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300">
             <Zap className="h-3.5 w-3.5" />
@@ -451,6 +417,14 @@ function AccountCardView({
             {card.busy === "switch" ? "Bascule…" : "Basculer sur ce compte"}
           </button>
         )}
+        <button
+          onClick={() => window.open(getWebTraderUrl(card.brokerName, card.server, card.login), "_blank")}
+          title="Ouvrir le WebTrader MT5 du courtier"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300 transition hover:border-cyan-800 hover:bg-cyan-500/10 hover:text-cyan-300"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Ouvrir WebTrader
+        </button>
         <button
           onClick={onDelete}
           title="Supprimer ce compte"
@@ -511,6 +485,7 @@ function ConnectModal({
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [isReal, setIsReal] = useState(false);
+  const [openWebTrader, setOpenWebTrader] = useState(true);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<BrokerTestResult | null>(null);
@@ -565,6 +540,14 @@ function ConnectModal({
       });
       if (res?.success && res.account) {
         onSaved(res.account);
+        if (openWebTrader) {
+          const url = getWebTraderUrl(
+            res.account.broker_name || broker,
+            res.account.server || server,
+            res.account.login || loginNum,
+          );
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
       } else {
         notify("err", res?.error || "Échec de l'enregistrement");
       }
@@ -646,7 +629,7 @@ function ConnectModal({
               value={login}
               onChange={(e) => setLogin(e.target.value.replace(/\D/g, ""))}
               inputMode="numeric"
-              placeholder="ex: 50291048"
+              placeholder="ex: 0123456789"
               className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-200 focus:border-cyan-700 focus:outline-none"
             />
           </label>
@@ -698,6 +681,19 @@ function ConnectModal({
               <span className="h-4 w-4 rounded-full bg-white shadow" />
             </div>
           </div>
+
+          {/* Ouverture WebTrader */}
+          <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+            <input
+              type="checkbox"
+              checked={openWebTrader}
+              onChange={(e) => setOpenWebTrader(e.target.checked)}
+              className="h-4 w-4 accent-cyan-600"
+            />
+            <span className="text-xs text-zinc-300">
+              Ouvrir le WebTrader MT5 dans un nouvel onglet après la connexion
+            </span>
+          </label>
 
           {/* Résultat du test */}
           {testResult && (

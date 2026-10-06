@@ -28,8 +28,8 @@ export default function MarketDepthChart({ symbol = "EURUSD", height = 320 }: Ma
         if (res) {
           setData(res);
         } else {
-          // Fallback simulé si backend indisponible
-          setData(mockDepth());
+          // Backend indisponible : aucun carnet — état vide propre.
+          setData(null);
         }
         setLoading(false);
       }
@@ -92,7 +92,8 @@ export default function MarketDepthChart({ symbol = "EURUSD", height = 320 }: Ma
             <span className="font-mono text-[10px] uppercase text-zinc-500">Mid</span>
             <span className="font-mono text-sm font-bold text-cyan-300">{data.midPrice.toFixed(5)}</span>
             <span className="font-mono text-[10px] text-zinc-500">
-              {data.bids[0]?.price.toFixed(5)} / {data.asks[0]?.price.toFixed(5)}
+              {data.bids.length > 0 ? data.bids[0].price.toFixed(5) : "—"} /{" "}
+              {data.asks.length > 0 ? data.asks[0].price.toFixed(5) : "—"}
             </span>
           </div>
 
@@ -141,29 +142,3 @@ function DepthRow({
   );
 }
 
-function mockDepth(): MarketDepthData {
-  // Fallback déterministe si le backend est injoignable.
-  const mid = 1.0852;
-  const step = 0.0001;
-  const bids = Array.from({ length: 8 }, (_, i) => {
-    const price = mid - (i + 1) * step;
-    const volume = Math.max(2, 40 - i * 4);
-    return {
-      price: Math.round(price * 1e5) / 1e5,
-      volume,
-      totalVolume: Math.round((volume * (8 - i)) * 10) / 10,
-      ordersCount: 1 + ((i * 3) % 14),
-    };
-  });
-  const asks = Array.from({ length: 8 }, (_, i) => {
-    const price = mid + (i + 1) * step;
-    const volume = Math.max(2, 36 - i * 3.5);
-    return {
-      price: Math.round(price * 1e5) / 1e5,
-      volume,
-      totalVolume: Math.round((volume * (8 - i)) * 10) / 10,
-      ordersCount: 2 + ((i * 5) % 15),
-    };
-  });
-  return { midPrice: mid, bids, asks };
-}
