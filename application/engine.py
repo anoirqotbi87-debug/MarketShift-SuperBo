@@ -267,9 +267,19 @@ class Engine:
 
     async def _process_symbol_async(self, symbol: str):
         """Traite un symbole de manière asynchrone : données → signal → ML → sizing → exécution."""
-        # 1. Récupérer les données OHLCV M1 (Offload au ThreadPool pour ne pas bloquer l'Event Loop)
-        # On utilise self._tf_m15 pour des trades plus propres
-        df = await asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m15, 200)
+        # 1. Récupérer les données OHLCV M15 — timeout 5s strict pour éviter les freezes MT5
+        try:
+            df = await asyncio.wait_for(
+                asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m15, 200),
+                timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[Engine] ⏱️ Timeout (5s) sur get_historical_data({symbol}) — symbole ignoré ce cycle.")
+            return
+        except Exception as e:
+            logging.warning(f"[Engine] Erreur get_historical_data({symbol}): {e}")
+            return
+
         if df is None or len(df) < 2:
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
@@ -333,8 +343,15 @@ class Engine:
             f"Source: {signal.source}"
         )
 
-        # 4. Filtre ML — valide ou rejette le signal (Offload to thread pour éviter de bloquer l'Event Loop)
-        validated_signal = await asyncio.to_thread(self.ml_predictor.filter_signal, signal, df)
+        # 4. Filtre ML — timeout 10s (le modèle LSTM peut être lent sur CPU)
+        try:
+            validated_signal = await asyncio.wait_for(
+                asyncio.to_thread(self.ml_predictor.filter_signal, signal, df),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[Engine] ⏱️ Timeout ML (10s) sur {symbol} — signal ignoré ce cycle.")
+            return
         if not validated_signal:
             logging.info(f"[Engine] 🤖 Signal {signal.direction.name} {symbol} rejeté par ML.")
             return
@@ -343,13 +360,13 @@ class Engine:
         if not self.state_manager.account:
             return
 
-        # --- NOUVEAU: Bloqueur de Pyramiding (Account Blow-up Protection) ---
+        # --- Bloqueur de Pyramiding (Account Blow-up Protection) ---
         has_open_position = any(p.symbol == symbol for p in self.state_manager.positions)
         if has_open_position:
             logging.info(f"[Engine] 🛡️ Rejet: Position déjà ouverte sur {symbol}. Pyramiding interdit.")
             return
             
-        # --- NOUVEAU: Limite d'Exposition Globale (Max 2 trades simultanés) ---
+        # --- Limite d'Exposition Globale (Max 2 trades simultanés) ---
         bot_positions = [p for p in self.state_manager.positions if getattr(p, 'magic', 0) != 0]
         if len(bot_positions) >= 2:
             logging.info(f"[Engine] 🛡️ Rejet: Limite d'exposition globale atteinte (Max 2 trades simultanés).")
@@ -371,14 +388,21 @@ class Engine:
             max_vol = getattr(sym_info, 'volume_max', 100.0)
             vol_step = getattr(sym_info, 'volume_step', 0.01)
 
-        # Offload SQLAlchemy queries to a background thread to prevent blocking the async loop
-        is_valid = await asyncio.to_thread(
-            self.pretrade_validator.validate_signal, 
-            validated_signal, 
-            self.state_manager.account, 
-            current_spread_pips,
-            self.state_manager.positions
-        )
+        # Offload SQLAlchemy queries to a background thread — timeout 4s strict
+        try:
+            is_valid = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.pretrade_validator.validate_signal, 
+                    validated_signal, 
+                    self.state_manager.account, 
+                    current_spread_pips,
+                    self.state_manager.positions
+                ),
+                timeout=4.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[Engine] ⏱️ Timeout PreTradeValidator (4s) sur {symbol} — signal ignoré.")
+            return
         if not is_valid:
             # Le Validator gère lui-même ses propres logs d'erreurs détaillés
             return

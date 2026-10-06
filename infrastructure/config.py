@@ -27,7 +27,9 @@ class AppConfig(BaseSettings):
     ATR_TP_MULTIPLIER: float = Field(2.5, ge=0.1)
 
     # ── ML ────────────────────────────────────────────────────────────────────
-    ML_CONFIDENCE_THRESHOLD: float = Field(0.60, ge=0.0, le=1.0)
+    # Seuil calibré à 58% (cohérent avec l'accuracy modèle ~62.7%).
+    # Overridable par symbole via ML_CONFIDENCE_THRESHOLD_EURUSD=0.55 dans .env
+    ML_CONFIDENCE_THRESHOLD: float = Field(0.58, ge=0.0, le=1.0)
 
     # ── Credentials ───────────────────────────────────────────────────────────
     XM_LOGIN: str = Field("")

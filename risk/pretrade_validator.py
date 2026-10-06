@@ -46,8 +46,6 @@ class PreTradeValidator:
                 for pos in open_positions:
                     pos_base = pos.symbol.upper().replace("MICRO", "").replace("M", "")
                     if pos_base in correlated_group and pos_base != sym_base:
-                        # Si on a déjà l'autre paire dans le même sens, on rejette
-                        # Attention, direction de MetaTrader5 (0=BUY, 1=SELL)
                         sig_type = 0 if signal.direction.name == "BUY" else 1
                         if pos.type == sig_type:
                             logging.warning(f"[Validator] 🛡️ Rejet: Double exposition détectée. {pos.symbol} déjà ouvert, on ignore {signal.symbol}.")
@@ -57,24 +55,28 @@ class PreTradeValidator:
         if time.time() < self._cooldown_until:
             remaining = int((self._cooldown_until - time.time()) / 60)
             logging.warning(f"[Validator] 🚫 Rejet: Bot en Cooldown (Revenge Trading Protection). Attente: {remaining} min.")
+            logging.debug(f"[Validator] [{signal.symbol}] cooldown_until={self._cooldown_until:.0f} | now={time.time():.0f}")
             return False
 
         # 2. Vérification de la Marge
         if account.margin_level > 0 and account.margin_level < self.MIN_MARGIN_LEVEL:
             logging.warning(f"[Validator] 🚫 Rejet: Niveau de marge critique ({account.margin_level}% < {self.MIN_MARGIN_LEVEL}%)")
+            logging.debug(f"[Validator] [{signal.symbol}] margin_level={account.margin_level:.1f}% seuil={self.MIN_MARGIN_LEVEL}%")
             return False
 
-        # Validation du Spread (dynamique selon le symbole)
+        # 3. Validation du Spread (dynamique selon le symbole)
         max_spread = self.MAX_SPREAD_PIPS
         sym_upper = signal.symbol.upper()
         if 'BTC' in sym_upper:
-            max_spread = 80.0  # Le Bitcoin a naturellement un spread massif en pips
+            max_spread = 80.0
         elif 'ETH' in sym_upper:
             max_spread = 20.0
         elif 'GOLD' in sym_upper or 'XAU' in sym_upper:
             max_spread = 25.0
         elif sym_upper in ['EURUSD', 'GBPUSD', 'USDJPY']:
-            max_spread = 3.0   # Protection stricte pour le Forex (Normal ~1.0 pip)
+            max_spread = 3.0
+
+        logging.debug(f"[Validator] [{signal.symbol}] Spread check: actuel={current_spread_pips:.2f} pips | max_autorisé={max_spread} pips")
 
         if current_spread_pips > max_spread:
             logging.warning(
@@ -83,23 +85,23 @@ class PreTradeValidator:
             )
             return False
 
-        # --- NOUVEAU: Filtre de Zone Morte (Rollover) ---
-        # Le rollover MT5 (00:00 - 01:00) a des spreads élargis et peu de liquidité
-        from datetime import datetime
-        current_hour = datetime.utcnow().hour
-        # Note: L'heure du serveur MT5 (généralement UTC+2 ou UTC+3) n'est pas dispo ici.
-        # Mais le filtre de Spread strict à 3.0 pips bloquera de toute façon le rollover.
-
         # 4. Confiance ML
-        if signal.confidence < Config.ML_CONFIDENCE_THRESHOLD:
-            logging.warning(f"[Validator] 🚫 Rejet: Confiance ML insuffisante ({signal.confidence:.2f})")
+        ml_threshold = Config.ML_CONFIDENCE_THRESHOLD
+        logging.debug(
+            f"[Validator] [{signal.symbol}] Confiance ML : score={signal.confidence:.1%} | "
+            f"seuil={ml_threshold:.1%} — {'✅ ACCEPTÉ' if signal.confidence >= ml_threshold else '❌ REJETÉ'}"
+        )
+        if signal.confidence < ml_threshold:
+            logging.warning(f"[Validator] 🚫 Rejet: Confiance ML insuffisante ({signal.confidence:.2f} < {ml_threshold:.2f})")
             return False
 
         # 5. Rate Limiting (Knight Capital Protection)
         now = time.time()
         
-        # --- NOUVEAU: Cooldown absolu de 5 secondes (Anti-Rafale / Anti-Pyramiding) ---
+        # --- Cooldown absolu de 5 secondes (Anti-Rafale / Anti-Pyramiding) ---
         if self._order_timestamps and now - self._order_timestamps[-1] < 5.0:
+            elapsed = now - self._order_timestamps[-1]
+            logging.debug(f"[Validator] [{signal.symbol}] Anti-Rafale: dernier ordre il y a {elapsed:.1f}s (min=5s)")
             logging.warning(
                 f"[Validator] 🚫 Rejet: Cooldown Anti-Rafale actif. Veuillez patienter 5 secondes entre chaque ordre."
             )
@@ -108,6 +110,8 @@ class PreTradeValidator:
         # Ne garder que les timestamps de la dernière minute
         self._order_timestamps = [t for t in self._order_timestamps if now - t < 60]
         
+        logging.debug(f"[Validator] [{signal.symbol}] Rate Limit: {len(self._order_timestamps)}/{self.MAX_ORDERS_PER_MINUTE} ordres dans la dernière minute")
+
         if len(self._order_timestamps) >= self.MAX_ORDERS_PER_MINUTE:
             logging.critical(
                 f"[Validator] 🛑 REJET CRITIQUE: Rate Limit dépassé ({self.MAX_ORDERS_PER_MINUTE} ordres/min). "
