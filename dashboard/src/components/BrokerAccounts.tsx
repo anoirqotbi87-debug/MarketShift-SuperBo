@@ -489,6 +489,7 @@ function ConnectModal({
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<BrokerTestResult | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const filtered = PRESETS.filter((p) =>
     p.name.toLowerCase().includes(search.trim().toLowerCase()),
@@ -512,6 +513,13 @@ function ConnectModal({
   };
 
   const handleTest = async () => {
+    setValidationError(null);
+    if (server.trim() === "" || loginNum <= 0 || password === "") {
+      setValidationError(
+        "Veuillez renseigner le serveur, le numéro de compte et le mot de passe avant de tester.",
+      );
+      return;
+    }
     setTesting(true);
     setTestResult(null);
     try {
@@ -520,9 +528,13 @@ function ConnectModal({
         login: loginNum,
         password,
       });
-      setTestResult(res);
+      if (res === null) {
+        setTestResult({ success: false, error: "Serveur backend injoignable" });
+      } else {
+        setTestResult(res);
+      }
     } catch {
-      setTestResult({ success: false, error: "Backend injoignable" });
+      setTestResult({ success: false, error: "Serveur backend injoignable" });
     } finally {
       setTesting(false);
     }
@@ -616,7 +628,10 @@ function ConnectModal({
             <span className="text-[10px] uppercase tracking-wider text-zinc-500">Serveur MT5</span>
             <input
               value={server}
-              onChange={(e) => setServer(e.target.value)}
+              onChange={(e) => {
+                setServer(e.target.value);
+                setValidationError(null);
+              }}
               placeholder="ex: XMGlobal-MT5 9, Exness-Real"
               className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-200 focus:border-cyan-700 focus:outline-none"
             />
@@ -627,7 +642,10 @@ function ConnectModal({
             <span className="text-[10px] uppercase tracking-wider text-zinc-500">Numéro de compte (Login)</span>
             <input
               value={login}
-              onChange={(e) => setLogin(e.target.value.replace(/\D/g, ""))}
+              onChange={(e) => {
+                setLogin(e.target.value.replace(/\D/g, ""));
+                setValidationError(null);
+              }}
               inputMode="numeric"
               placeholder="ex: 0123456789"
               className="mt-1 w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-200 focus:border-cyan-700 focus:outline-none"
@@ -641,7 +659,10 @@ function ConnectModal({
               <input
                 type={showPass ? "text" : "password"}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setValidationError(null);
+                }}
                 placeholder="••••••••••••"
                 className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 pr-9 font-mono text-xs text-zinc-200 focus:border-cyan-700 focus:outline-none"
               />
@@ -695,6 +716,13 @@ function ConnectModal({
             </span>
           </label>
 
+          {/* Erreur de validation (champs manquants) */}
+          {validationError && (
+            <div className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-2 text-[11px] text-rose-300">
+              ⚠️ {validationError}
+            </div>
+          )}
+
           {/* Résultat du test */}
           {testResult && (
             <div
@@ -708,7 +736,7 @@ function ConnectModal({
                 <span>
                   ✅ Connexion réussie — Ping {testResult.ping_ms ?? 0} ms · Solde{" "}
                   {testResult.balance?.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}{" "}
-                  {testResult.currency} · Équité {testResult.equity?.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}
+                  {testResult.currency} · Levier 1:{testResult.leverage || "—"}
                 </span>
               ) : (
                 <span>❌ {testResult.error || "Échec de connexion"}</span>
@@ -719,18 +747,24 @@ function ConnectModal({
           {/* Boutons */}
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
+              type="button"
               onClick={() => void handleTest()}
-              disabled={!canTest || testing}
-              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:opacity-50 ${
+              disabled={testing}
+              className={`inline-flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition disabled:cursor-wait disabled:opacity-70 ${
                 testResult?.success
                   ? "border-emerald-800 bg-emerald-500/10 text-emerald-300"
                   : "border-zinc-700 bg-zinc-800/60 text-zinc-300 hover:bg-zinc-800"
               }`}
             >
               {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-              {testing ? "Test en cours…" : testResult?.success ? "Re-tester la connexion" : "Tester la connexion d'abord"}
+              {testing
+                ? "Connexion au serveur MT5 en cours... (max 4s)"
+                : testResult?.success
+                  ? "Re-tester la connexion"
+                  : "Tester la connexion d'abord"}
             </button>
             <button
+              type="button"
               onClick={() => void handleSave()}
               disabled={!canSave || saving}
               className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-500 disabled:opacity-50"

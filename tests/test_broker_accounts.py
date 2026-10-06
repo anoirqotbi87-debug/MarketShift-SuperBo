@@ -32,6 +32,7 @@ import api.server as server
 from api.server import (
     BrokerConnectRequest,
     BrokerSwitchRequest,
+    BrokerTestRequest,
     init_api,
     list_broker_accounts,
     connect_broker_account,
@@ -144,6 +145,20 @@ def _run(coro):
 
 def test_list_empty(engine):
     assert _run(list_broker_accounts()) == []
+
+
+def test_connection_result_exposes_leverage(engine):
+    """Le test de connexion expose ping/solde/levier pour l'affichage UI."""
+    server._broker_test_connection = _sim_success
+    res = _run(
+        server.test_broker_connection(
+            BrokerTestRequest(server="XMGlobal-MT5 9", login=50291048, password="MonPass123!")
+        )
+    )
+    assert res["success"] is True
+    assert res["ping_ms"] == 12.4
+    assert res["balance"] == 50210.5
+    assert res["leverage"] == 100
 
 
 def test_connect_persists_encrypted(engine):
@@ -289,6 +304,7 @@ async def _sim_success(server_name: str, login: int, password: str) -> dict:
         "ping_ms": 12.4,
         "balance": 50210.5,
         "equity": 50780.1,
+        "leverage": 100,
         "currency": "USD",
     }
 
