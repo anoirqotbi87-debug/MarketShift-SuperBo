@@ -48,8 +48,8 @@ export default function ConnectionSwitcher({ connected, onReconnect }: Connectio
 
       {open && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-zinc-800 bg-zinc-950 p-4 shadow-2xl">
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-2 w-80 rounded-xl border border-zinc-800 bg-zinc-950 p-4 shadow-2xl">
             <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">
               Connexion hybride
             </p>
