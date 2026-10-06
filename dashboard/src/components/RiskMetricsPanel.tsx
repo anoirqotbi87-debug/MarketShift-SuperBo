@@ -34,8 +34,8 @@ export default function RiskMetricsPanel({ snapshot, equityCurve }: RiskMetricsP
       bySym.set(p.symbol, e);
     }
     const maxSym = Array.from(bySym.entries()).sort((a, b) => b[1].lots - a[1].lots)[0]?.[1];
-    const exposurePct = account.equity > 0 ? ((account.balance - account.freeMargin) / account.equity) * 100 : 0;
-    const marginLevelPct = account.marginLevel ?? (account.equity > 0 ? (account.equity / Math.max(1, account.balance - account.freeMargin)) * 100 : 0);
+    const exposurePct = account && account.equity > 0 ? ((account.balance - account.freeMargin) / account.equity) * 100 : 0;
+    const marginLevelPct = account?.marginLevel ?? (account && account.equity > 0 ? (account.equity / Math.max(1, account.balance - account.freeMargin)) * 100 : 0);
 
     return { currentDd, maxDd, maxSymLots: maxSym?.lots ?? 0, exposurePct, marginLevelPct };
   }, [equityCurve, account, positions]);

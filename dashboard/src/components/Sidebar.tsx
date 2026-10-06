@@ -5,6 +5,7 @@ import {
   BarChart3,
   BrainCircuit,
   GaugeCircle,
+  Landmark,
   LineChart,
   PanelLeftClose,
   PanelLeftOpen,
@@ -22,6 +23,7 @@ export type DashboardView =
   | "analytics"
   | "ml"
   | "mt5"
+  | "brokers"
   | "logs";
 
 interface SidebarProps {
@@ -40,6 +42,7 @@ const NAV_ITEMS: Array<{ id: DashboardView; label: string; icon: typeof Activity
   { id: "backtest", label: "Backtest Studio", icon: BarChart3 },
   { id: "ml", label: "ML Engine", icon: BrainCircuit },
   { id: "mt5", label: "MT5 Bridge", icon: Radio },
+  { id: "brokers", label: "Comptes Broker", icon: Landmark },
   { id: "config", label: "Stratégies & Risque", icon: Settings2 },
   { id: "logs", label: "Terminal Logs", icon: SquareTerminal },
 ];
