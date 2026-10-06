@@ -1,0 +1,17 @@
+# Dépendances
+node_modules/
+
+# Builds
+.next/
+out/
+dist/
+
+# Environnement local (NE PAS committer — utiliser .env.example)
+.env.local
+.env.*.local
+
+# Divers
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+npm-debug.log*
