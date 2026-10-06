@@ -23,23 +23,40 @@ if TYPE_CHECKING:
 
 class MLPredictor:
     """
-    Filtre les signaux de trading via le modèle XGBoost entraîné.
+    Filtre les signaux de trading via le modèle entraîné (ensemble XGBoost + LSTM).
     """
 
-    # Le seuil de confiance doit être élevé (68%) pour que l'IA prenne une vraie décision
-    DEFAULT_CONFIDENCE_THRESHOLD = 0.68   
+    # Seuil par défaut calibré sur l'accuracy globale du modèle (~62.7%).
+    # Surchargeable via env: ML_CONFIDENCE_THRESHOLD (global) ou
+    # ML_CONFIDENCE_THRESHOLD_<SYMBOL> (par symbole, ex: ML_CONFIDENCE_THRESHOLD_EURUSD=0.55).
+    DEFAULT_CONFIDENCE_THRESHOLD = 0.58
 
     def __init__(self, trainer: 'MLTrainer'):
+        from infrastructure.config import Config
         self._trainer = trainer
-        self._confidence_threshold = self.DEFAULT_CONFIDENCE_THRESHOLD
+        self._confidence_threshold = float(Config.ML_CONFIDENCE_THRESHOLD)
         logging.info(
-            f"[MLPredictor] Initialisé (seuil de confidence global par défaut: {self._confidence_threshold:.0%})"
+            f"[MLPredictor] Initialisé (seuil de confidence global: {self._confidence_threshold:.0%})"
         )
 
     def set_confidence_threshold(self, threshold: float) -> None:
-        """Met à jour le seuil de confidence (0.5 - 1.0) global (Legacy)."""
+        """Met à jour le seuil de confidence (0.5 - 1.0) global en runtime."""
         self._confidence_threshold = max(0.5, min(1.0, threshold))
         logging.info(f"[MLPredictor] Seuil global mis à jour: {self._confidence_threshold:.0%}")
+
+    def _effective_threshold(self, symbol: str) -> float:
+        """
+        Seuil effectif pour un symbole: override env par symbole (le cas échéant),
+        sinon seuil global (Config à l'init ou valeur runtime via set_confidence_threshold).
+        """
+        import os
+        env_val = os.getenv(f"ML_CONFIDENCE_THRESHOLD_{symbol}")
+        if env_val is not None:
+            try:
+                return float(env_val)
+            except ValueError:
+                logging.warning(f"[MLPredictor] ML_CONFIDENCE_THRESHOLD_{symbol} invalide: {env_val!r}")
+        return self._confidence_threshold
 
     def predict(self, df: 'pd.DataFrame') -> Tuple[str, float, dict]:
         """
@@ -117,8 +134,7 @@ class MLPredictor:
             )
             return signal
 
-        from infrastructure.config import Config
-        confidence_threshold = Config.get_symbol_ml_confidence(signal.symbol)
+        confidence_threshold = self._effective_threshold(signal.symbol)
 
         direction, confidence, _ = self.predict(df)
         signal_dir = signal.direction.name  # 'BUY' or 'SELL'

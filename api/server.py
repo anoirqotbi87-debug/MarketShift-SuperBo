@@ -78,7 +78,7 @@ class RuntimeSettings:
     risk_percent: float          = 0.01   # 1% par trade
     trailing_stop_active: bool   = True
     trailing_stop_multiplier: float = 1.0
-    ml_confidence_threshold: float  = 0.60
+    ml_confidence_threshold: float  = 0.58
 
 
 _runtime_settings = RuntimeSettings()
