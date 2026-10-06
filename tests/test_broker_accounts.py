@@ -161,6 +161,32 @@ def test_connection_result_exposes_leverage(engine):
     assert res["leverage"] == 100
 
 
+def test_webtrader_test_connection_validates_fields():
+    """La validation WebTrader rejette champs manquants/invalides SANS MT5 desktop."""
+    core = server._broker_test_connection_sync
+    assert core("", 0, "")["success"] is False
+    assert core("XMGlobal-MT5 9", 0, "pw")["success"] is False
+    assert core("XMGlobal-MT5 9", 123, "")["success"] is False
+    # Champs valides => succès (sonde réseau best-effort, jamais de faux rejet)
+    r = core("Exness-Real", 50291048, "MonPass")
+    assert r["success"] is True
+    assert "note" in r
+
+
+def test_connect_registers_without_mt5_open(engine):
+    """connect n'exige plus une session MT5 desktop : persistance immédiate."""
+    server._broker_test_connection = _sim_failure  # même un test simulé refusé n'empêche pas l'enregistrement
+    res = _run(
+        connect_broker_account(
+            BrokerConnectRequest(server="S1", login=333, password="p3", broker_name="A", account_type="DEMO")
+        )
+    )
+    assert res["success"] is True
+    assert res["account"]["login"] == 333
+    active = [a for a in _run(list_broker_accounts()) if a["is_active"]]
+    assert len(active) == 1 and active[0]["login"] == 333
+
+
 def test_connect_persists_encrypted(engine):
     server._broker_test_connection = _sim_success
     res = _run(

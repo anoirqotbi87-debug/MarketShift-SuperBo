@@ -1400,73 +1400,100 @@ def _load_broker_accounts() -> List[dict]:
         return []
 
 
+def _broker_http_probe(host: str, port: int = 443, timeout: float = 1.5) -> float:
+    """
+    Vérifie l'accessibilité réseau d'un hôte sans ouvrir de terminal desktop
+    (résolution DNS + connexion TCP). Retourne la latence en ms, lève sur échec.
+    """
+    import socket
+
+    t0 = time.time()
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect((infos[0][4][0], port))
+    finally:
+        sock.close()
+    return round((time.time() - t0) * 1000, 1)
+
+
+_BROKER_PROBE_HOSTS = {
+    # Lorsque le nom de serveur MT5 est un label logique (ex: "XMGlobal-MT5 9")
+    # non résoluble en DNS, on sonde l'hôte public du courtier correspondant.
+    "xm": "webtrader.xm.com",
+    "exness": "my.exness.com",
+    "icmarkets": "www.icmarkets.com",
+    "ftmo": "ftmo.com",
+}
+
+
 def _broker_test_connection_sync(server: str, login: int, password: str) -> dict:
     """
-    Teste une connexion MT5 de manière SYNCHRONE (appelée via asyncio.to_thread).
-    Retourne toujours un dict (jamais d'exception) pour éviter tout freeze.
+    Mode 100% WebTrader : ne lance JAMAIS terminal64.exe / mt5.initialize().
+
+    Valide les champs (serveur/login/mot de passe) puis tente une vérification
+    d'accessibilité réseau du serveur courtier (DNS + TCP 443) SANS ouvrir de GUI
+    desktop. La sonde est best-effort : elle enrichit `ping_ms`/`note` mais ne
+    produit jamais un faux rejet (un serveur peut être joint depuis le réseau du
+    client mais pas depuis celui du backend). Retourne toujours un dict.
     """
     try:
-        import MetaTrader5 as mt5
-        if mt5 is None:  # fallback import résilient renvoie None sur Linux
-            return {"success": False, "error": "MetaTrader5 indisponible (package Windows-only) sur cet environnement"}
-    except ImportError:
-        return {"success": False, "error": "MetaTrader5 indisponible (package Windows-only' non installable sur ce système de trading)"}
+        server_s = (server or "").strip()
+        if not server_s:
+            return {"success": False, "error": "Serveur MT5 manquant"}
+        if not login or int(login) <= 0:
+            return {"success": False, "error": "Numéro de compte (login) invalide"}
+        if not password:
+            return {"success": False, "error": "Mot de passe manquant"}
 
-    try:
-        t0 = time.time()
-        # shutdown pour ne pas interférer avec une session active
+        host = server_s.split()[0]
+        probe_host = host
+        s_lower = server_s.lower()
+        for key, public_host in _BROKER_PROBE_HOSTS.items():
+            if key in s_lower:
+                probe_host = public_host
+                break
+
+        ping_ms = None
+        note = "Compte validé en mode WebTrader (sans terminal desktop)"
         try:
-            mt5.shutdown()
+            ping_ms = _broker_http_probe(probe_host)
         except Exception:
-            pass
+            try:
+                ping_ms = _broker_http_probe(host)
+            except Exception:
+                note = (
+                    "Compte validé en mode WebTrader — "
+                    f"serveur {probe_host} non joignable depuis le backend (vérification différée)"
+                )
 
-        if login > 0 and password and server:
-            init_ok = mt5.initialize(login=login, password=password, server=server)
-        else:
-            init_ok = mt5.initialize()
-
-        if not init_ok:
-            err = mt5.last_error() if hasattr(mt5, "last_error") else None
-            return {
-                "success": False,
-                "ping_ms": round((time.time() - t0) * 1000, 1),
-                "error": f"MT5 initialization failed: {err}",
-            }
-
-        info = mt5.account_info()
-        ping_ms = round((time.time() - t0) * 1000, 1)
-        if info is None:
-            return {
-                "success": True,
-                "ping_ms": ping_ms,
-                "balance": 0.0,
-                "error": "Connecté mais account_info indisponible",
-            }
         return {
             "success": True,
             "ping_ms": ping_ms,
-            "balance": float(info.balance),
-            "equity": float(info.equity),
-            "leverage": int(getattr(info, "leverage", 0) or 0),
-            "currency": getattr(info, "currency", "USD"),
+            "balance": None,
+            "equity": None,
+            "leverage": None,
+            "currency": None,
+            "note": note,
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"Erreur de validation : {e}"}
 
 
 async def _broker_test_connection(server: str, login: int, password: str) -> dict:
-    """Version async avec timeout strict de 4s (jamais bloquant pour l'Engine)."""
+    """Version async avec timeout strict (jamais bloquant pour l'Engine)."""
     try:
         return await asyncio.wait_for(
             asyncio.to_thread(_broker_test_connection_sync, server, login, password),
             timeout=MT5_CONNECT_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        logging.warning(f"[Broker] Timeout {MT5_CONNECT_TIMEOUT}s sur test connexion MT5 (server={server}, login={login})")
+        logging.warning(f"[Broker] Timeout {MT5_CONNECT_TIMEOUT}s sur vérification WebTrader (server={server}, login={login})")
         return {
             "success": False,
             "ping_ms": MT5_CONNECT_TIMEOUT * 1000,
-            "error": f"Timeout après {MT5_CONNECT_TIMEOUT}s (MT5 ne répond pas)",
+            "error": f"Timeout après {MT5_CONNECT_TIMEOUT}s (serveur injoignable)",
         }
 
 
@@ -1487,44 +1514,52 @@ async def test_broker_connection(req: BrokerTestRequest, api_key: str = Depends(
 @app.post("/brokers/connect")
 async def connect_broker_account(req: BrokerConnectRequest, api_key: str = Depends(verify_api_key)):
     """
-    Teste la connexion puis enregistre le compte (persistance chiffrée).
-    Si aucun compte actif n'existe, le nouveau compte devient actif.
-    """
-    # 1. Test réel
-    test = await _broker_test_connection(req.server, req.login, req.password)
-    if not test.get("success"):
-        return {"success": False, "error": test.get("error", "Connexion MT5 refusée")}
+    Mode 100% WebTrader : N'OUVRE JAMAIS le terminal desktop (pas de mt5.initialize()).
 
-    # 2. Persistance
+    Valide les champs (serveur/login/mot de passe), chiffre et persiste le compte
+    immédiatement (< 200 ms). La vérification d'accessibilité réseau du serveur
+    courtier est best-effort en arrière-plan et alimente `last_result` sans jamais
+    bloquer la sauvegarde.
+    """
+    # 1. Validation explicite des champs
+    server_s = (req.server or "").strip()
+    if not server_s:
+        return {"success": False, "error": "Serveur MT5 manquant"}
+    if not req.login or int(req.login) <= 0:
+        return {"success": False, "error": "Numéro de compte (login) invalide"}
+    if not req.password:
+        return {"success": False, "error": "Mot de passe manquant"}
+    account_type = "REAL" if (req.account_type or "DEMO").upper() == "REAL" else "DEMO"
+
+    # 2. Persistance immédiate (chiffrée)
     encrypted = encrypt_secret(req.password)
     db = SessionLocal()
     try:
         from infrastructure.models import BrokerAccount
-        acc = BrokerAccount(
-            broker_name=req.broker_name,
-            server=req.server,
-            login=req.login,
-            password_encrypted=encrypted,
-            account_type="REAL" if req.account_type.upper() == "REAL" else "DEMO",
-            balance=float(test.get("balance", 0.0)),
-            equity=float(test.get("equity", 0.0)),
-            currency=test.get("currency", "USD"),
-            last_result=f"OK · {test.get('ping_ms')}ms",
-        )
-        existing = db.query(BrokerAccount).filter(
-            BrokerAccount.server == req.server,
+        acc = db.query(BrokerAccount).filter(
+            BrokerAccount.server == server_s,
             BrokerAccount.login == req.login,
         ).first()
-        if existing:
-            acc = existing
-            acc.balance = float(test.get("balance", 0.0))
-            acc.equity = float(test.get("equity", 0.0))
-            acc.currency = test.get("currency", "USD")
-            acc.last_result = f"OK · {test.get('ping_ms')}ms"
+        if acc is None:
+            acc = BrokerAccount(
+                broker_name=req.broker_name,
+                server=server_s,
+                login=req.login,
+                password_encrypted=encrypted,
+                account_type=account_type,
+                balance=0.0,
+                equity=0.0,
+                currency="USD",
+                last_result="WebTrader · en attente de vérification",
+            )
+        else:
+            acc.balance = float(getattr(acc, "balance", 0.0) or 0.0)
+            acc.equity = float(getattr(acc, "equity", 0.0) or 0.0)
+            acc.currency = acc.currency or "USD"
+            acc.last_result = "WebTrader · en attente de vérification"
             acc.password_encrypted = encrypted
             acc.broker_name = req.broker_name
-            acc.account_type = "REAL" if req.account_type.upper() == "REAL" else "DEMO"
-            db.add(acc)
+            acc.account_type = account_type
 
         # Premier compte => actif
         active_count = db.query(BrokerAccount).filter(BrokerAccount.is_active == True).count()
@@ -1534,10 +1569,33 @@ async def connect_broker_account(req: BrokerConnectRequest, api_key: str = Depen
         db.add(acc)
         db.commit()
         db.refresh(acc)
+        account_id = acc.id
     finally:
         db.close()
 
-    logging.info(f"[Broker] Compte enregistré: {req.broker_name} {req.server} #{req.login} (type={req.account_type})")
+    # 3. Vérification réseau best-effort en arrière-plan (jamais bloquant)
+    async def _probe_and_record(account_id_: int, server_: str, login_: int, password_: str) -> None:
+        try:
+            probe = await _broker_test_connection(server_, login_, password_)
+            db_p = SessionLocal()
+            try:
+                from infrastructure.models import BrokerAccount
+                row = db_p.query(BrokerAccount).filter(BrokerAccount.id == account_id_).first()
+                if row:
+                    if probe.get("success"):
+                        row.last_result = f"WebTrader OK · {probe.get('ping_ms')}ms"
+                    else:
+                        row.last_result = str(probe.get("error", "Serveur injoignable"))
+                    db_p.add(row)
+                    db_p.commit()
+            finally:
+                db_p.close()
+        except Exception as e:
+            logging.warning(f"[Broker] Vérification réseau en arrière-plan échouée (account #{account_id_}): {e}")
+
+    asyncio.create_task(_probe_and_record(account_id, server_s, req.login, req.password))
+
+    logging.info(f"[Broker] Compte enregistré (WebTrader): {req.broker_name} {server_s} #{req.login} (type={account_type})")
     return {"success": True, "account": _broker_public_dict(acc)}
 
 

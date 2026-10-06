@@ -541,25 +541,31 @@ function ConnectModal({
   };
 
   const handleSave = async () => {
+    // Validation explicite (même erreur que le bouton "Tester").
+    if (server.trim() === "" || loginNum <= 0 || password === "") {
+      setValidationError(
+        "Veuillez renseigner le serveur, le numéro de compte et le mot de passe avant d'enregistrer.",
+      );
+      return;
+    }
+
+    // Anti-popup : ouvre le WebTrader IMMÉDIATEMENT (avant tout await) pour que
+    // le navigateur n'applique pas son blocage des popups sur appel asynchrone.
+    const brokerName = broker === "Custom" ? String(loginNum) : broker;
+    const webTraderUrl = getWebTraderUrl(brokerName, server, loginNum);
+    const newTab = openWebTrader ? window.open(webTraderUrl, "_blank", "noopener,noreferrer") : null;
+
     setSaving(true);
     try {
       const res = await connectBrokerAccount({
         server,
         login: loginNum,
         password,
-        broker_name: broker === "Custom" ? loginNum.toString() : broker,
+        broker_name: brokerName,
         account_type: isReal ? "REAL" : "DEMO",
       });
       if (res?.success && res.account) {
         onSaved(res.account);
-        if (openWebTrader) {
-          const url = getWebTraderUrl(
-            res.account.broker_name || broker,
-            res.account.server || server,
-            res.account.login || loginNum,
-          );
-          window.open(url, "_blank", "noopener,noreferrer");
-        }
       } else {
         notify("err", res?.error || "Échec de l'enregistrement");
       }
@@ -567,6 +573,9 @@ function ConnectModal({
       notify("err", "Backend injoignable — impossible d'enregistrer");
     } finally {
       setSaving(false);
+      if (openWebTrader && newTab === null) {
+        notify("err", "Pop-up bloquée — autorisez les popups pour ouvrir le WebTrader.");
+      }
     }
   };
 
@@ -733,11 +742,16 @@ function ConnectModal({
               }`}
             >
               {testResult.success ? (
-                <span>
-                  ✅ Connexion réussie — Ping {testResult.ping_ms ?? 0} ms · Solde{" "}
-                  {testResult.balance?.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}{" "}
-                  {testResult.currency} · Levier 1:{testResult.leverage || "—"}
-                </span>
+                testResult.ping_ms != null ? (
+                  <span>
+                    ✅ Compte validé — Ping {testResult.ping_ms} ms ·{" "}
+                    {testResult.balance != null
+                      ? `Solde ${testResult.balance.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} ${testResult.currency ?? ""} · Levier 1:${testResult.leverage ?? "—"}`
+                      : "fonds lus directement dans le WebTrader"}
+                  </span>
+                ) : (
+                  <span>✅ {testResult.note || "Compte validé en mode WebTrader"}</span>
+                )
               ) : (
                 <span>❌ {testResult.error || "Échec de connexion"}</span>
               )}
