@@ -30,6 +30,9 @@ ui/.vite/
 *.swp
 *.swo
 
+# Mémoire agent locale / fichiers de travail
+.openhands/
+
 # OS
 .DS_Store
 Thumbs.db

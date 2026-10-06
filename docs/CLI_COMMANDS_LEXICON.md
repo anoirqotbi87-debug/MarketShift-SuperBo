@@ -46,5 +46,5 @@ Pour bien piloter le bot, il est crucial de maîtriser ce vocabulaire de niveau 
 - **Curve-fitting (Sur-optimisation) :** Le piège mortel en trading. C'est quand un bot est tellement optimisé pour le passé qu'il échoue lamentablement dans le futur. Nous combattons cela avec la simulation de Monte Carlo.
 
 ### C. Machine Learning
-- **ML Confidence Threshold :** Le seuil de confiance exigé par l'IA. Si fixé à 0.75, cela signifie que le modèle de Machine Learning (XGBoost) doit être sûr à 75% que le marché va monter pour autoriser un ordre d'achat.
+- **ML Confidence Threshold :** Le seuil de confiance exigé par l'IA. Si fixé à 0.58, cela signifie que le modèle de Machine Learning doit être sûr à 58% que le marché va monter pour autoriser un ordre d'achat. Valeur par défaut calibrée sur l'accuracy globale du modèle (~62.7%), surchargeable via `ML_CONFIDENCE_THRESHOLD` (global) ou `ML_CONFIDENCE_THRESHOLD_<SYMBOL>` (par symbole) dans `.env`.
 - **Look-ahead Bias :** Erreur fatale en backtesting où l'algorithme "triche" en voyant une donnée du futur pour prendre une décision au présent. Notre architecture événementielle (Event-Driven) empêche cela.
