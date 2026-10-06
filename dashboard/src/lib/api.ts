@@ -3,6 +3,10 @@ import type {
   ApplySettingsResponse,
   BacktestReport,
   BenchmarkPoint,
+  BrokerAccount,
+  BrokerConnectResponse,
+  BrokerSwitchResponse,
+  BrokerTestResult,
   ConnectionProfile,
   EquityPoint,
   HistoryBar,
@@ -315,4 +319,58 @@ export async function retrainMlModel(): Promise<{ status?: string; error?: strin
 /** Récupère l'historique MT5 /export-history (ouvre un téléchargement). */
 export function exportHistoryUrl(symbol: string, timeframe = "M15", numBars = 50000): string {
   return `${currentApiUrl}/export-history?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&num_bars=${numBars}`;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Comptes Broker — gestion & connexion multi-comptes
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Liste les comptes enregistrés (le mot de passe n'est jamais renvoyé). */
+export async function fetchBrokerAccounts(): Promise<BrokerAccount[]> {
+  const data = await request<BrokerAccount[]>("/brokers/accounts");
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Teste une connexion MT5 (server/login/password) auprès du backend avec un timeout strict.
+ * Le mot de passe transite uniquement chiffré (TLS), jamais stocké côté frontend.
+ */
+export async function testBrokerConnection(params: {
+  server: string;
+  login: number;
+  password: string;
+}): Promise<BrokerTestResult | null> {
+  return request<BrokerTestResult>("/brokers/test-connection", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+/** Teste puis enregistre un compte (persistance chiffrée côté backend). */
+export async function connectBrokerAccount(params: {
+  server: string;
+  login: number;
+  password: string;
+  broker_name: string;
+  account_type: "DEMO" | "REAL";
+}): Promise<BrokerConnectResponse | null> {
+  return request<BrokerConnectResponse>("/brokers/connect", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
+/** Bascule à chaud le bot sur le compte donné. */
+export async function switchActiveBroker(accountId: number): Promise<BrokerSwitchResponse | null> {
+  return request<BrokerSwitchResponse>("/brokers/switch-active", {
+    method: "POST",
+    body: JSON.stringify({ account_id: accountId }),
+  });
+}
+
+/** Supprime un compte enregistré. */
+export async function deleteBrokerAccount(accountId: number): Promise<{ success?: boolean; error?: string } | null> {
+  return request<{ success?: boolean; error?: string }>(`/brokers/accounts/${accountId}`, {
+    method: "DELETE",
+  });
 }

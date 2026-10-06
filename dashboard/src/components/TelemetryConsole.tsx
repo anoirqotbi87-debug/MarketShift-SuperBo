@@ -76,7 +76,7 @@ export default function TelemetryConsole({ logs, signals, ml }: TelemetryConsole
             }`}
           >
             <BrainCircuit className="h-3.5 w-3.5" />
-            ML {ml.trained ? "entraîné" : "non entraîné"} · acc {ml.accuracy.toFixed(1)}%
+            ML {ml.trained ? "entraîné" : "non entraîné"} · acc {(ml.accuracy ?? 0).toFixed(1)}%
           </span>
           <span className="rounded-md bg-cyan-500/10 px-2 py-1 text-cyan-300">
             <Cpu className="mr-1 inline h-3.5 w-3.5" />
