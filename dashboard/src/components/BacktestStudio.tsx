@@ -45,6 +45,9 @@ export default function BacktestStudio() {
   const [symbol, setSymbol] = useState("EURUSD");
   const [period, setPeriod] = useState<Period>("1 mois");
   const [capital, setCapital] = useState(10000);
+  const [riskPerTrade, setRiskPerTrade] = useState(1.5);
+  const [slPips, setSlPips] = useState(25);
+  const [tpPips, setTpPips] = useState(50);
   const [file, setFile] = useState<File | null>(null);
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<BacktestReport | null>(null);
@@ -52,6 +55,28 @@ export default function BacktestStudio() {
   const [buyHold, setBuyHold] = useState<SimulatedRow[]>([]);
   const [mode, setMode] = useState<"idle" | "backend" | "simulated">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const exportCsv = () => {
+    if (!report) return;
+    const headers = ["Symbol", "Period", "NetProfit", "WinRate", "ProfitFactor", "MaxDD", "Sharpe", "Trades"].join(",");
+    const row = [
+      symbol,
+      period,
+      report.net_profit ?? 0,
+      report.win_rate ?? 0,
+      report.profit_factor ?? 0,
+      report.max_drawdown ?? 0,
+      report.sharpe_ratio ?? 0,
+      report.total_trades ?? 0,
+    ].join(",");
+    const blob = new Blob([`${headers}\n${row}`], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `backtest_${symbol}_${period.replace(/\s/g, "")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const run = async () => {
     setRunning(true);
@@ -150,6 +175,44 @@ export default function BacktestStudio() {
           />
         </label>
 
+        <label className="mt-3 flex items-center justify-between gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Risque / trade (%)</span>
+          <input
+            type="number"
+            min="0.1"
+            max="5"
+            step="0.1"
+            value={riskPerTrade}
+            onChange={(e) => setRiskPerTrade(Number(e.target.value))}
+            className="w-28 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-right font-mono text-xs text-indigo-300 focus:border-cyan-700 focus:outline-none"
+          />
+        </label>
+
+        <div className="mt-3 flex items-center gap-2">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500">SL (pips)</span>
+            <input
+              type="number"
+              min="5"
+              max="200"
+              value={slPips}
+              onChange={(e) => setSlPips(Number(e.target.value))}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-right font-mono text-xs text-rose-300 focus:border-rose-700 focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-1 flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500">TP (pips)</span>
+            <input
+              type="number"
+              min="5"
+              max="400"
+              value={tpPips}
+              onChange={(e) => setTpPips(Number(e.target.value))}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-right font-mono text-xs text-emerald-300 focus:border-emerald-700 focus:outline-none"
+            />
+          </label>
+        </div>
+
         {/* Upload CSV (optionnel) */}
         <div className="mt-4">
           <button
@@ -198,6 +261,15 @@ export default function BacktestStudio() {
               P&L {report.net_profit! >= 0 ? "+" : ""}
               {fmtUsd(report.net_profit ?? 0)}
             </span>
+          )}
+          {report && (
+            <button
+              onClick={exportCsv}
+              className="rounded-md border border-zinc-700 bg-zinc-800/60 px-2 py-1 font-mono text-[10px] font-semibold text-zinc-300 transition hover:bg-zinc-700"
+              title="Exporter les résultats en CSV"
+            >
+              ⬇ CSV
+            </button>
           )}
         </div>
 

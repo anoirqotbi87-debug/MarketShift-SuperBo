@@ -12,8 +12,8 @@ import { applyOptimalSettings, fetchOptimizeStatus, startOptimize } from "@/lib/
 import { resultRowFromOptimize, simulateGridSearch } from "@/lib/engine";
 import type { GridResultRow, ObjectiveFunction } from "@/types/trading";
 
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
-const TIMEFRAMES = ["M1", "M5", "H1"];
+const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD", "GOLD", "BTCUSD", "ETHUSD", "US30", "US100"];
+const TIMEFRAMES = ["M1", "M5", "M15", "H1"];
 
 const OBJ_LABELS: Record<ObjectiveFunction, string> = {
   sharpe: "Ratio de Sharpe",
