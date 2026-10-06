@@ -86,7 +86,7 @@ class PreTradeValidator:
             return False
 
         # 4. Confiance ML
-        ml_threshold = Config.ML_CONFIDENCE_THRESHOLD
+        ml_threshold = Config.get_symbol_ml_confidence(signal.symbol)
         logging.debug(
             f"[Validator] [{signal.symbol}] Confiance ML : score={signal.confidence:.1%} | "
             f"seuil={ml_threshold:.1%} — {'✅ ACCEPTÉ' if signal.confidence >= ml_threshold else '❌ REJETÉ'}"

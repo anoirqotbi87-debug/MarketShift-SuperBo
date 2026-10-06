@@ -199,8 +199,13 @@ class Engine:
 
             start_time = time.time()
 
-            # Mise à jour de l'état du compte et des positions (Bloquant mais rapide)
-            self.state_manager.update_state()
+            # Mise à jour de l'état du compte et des positions (offload MT5 → timeout 4s anti-freeze)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(self.state_manager.update_state), timeout=4.0)
+            except asyncio.TimeoutError:
+                logging.warning("[Engine] ⏱️ Timeout (4s) sur update_state — état du compte inchangé ce cycle.")
+            except Exception as e:
+                logging.error(f"[Engine] Erreur update_state: {e}")
 
             # Surveillance de connectivité Broker / Compte avec latch anti-spam
             is_connected = bool(getattr(self.connector, "connected", False) and (self.state_manager.account is not None))
@@ -227,11 +232,24 @@ class Engine:
             # Vérifications de sécurité (Circuit Breaker)
             self.circuit_breaker.check()
 
-            # Mise à jour du Kelly Criterion avec les trades fermés
-            self._refresh_kelly_history()
+            # Mise à jour du Kelly Criterion avec les trades fermés (offload MT5 → timeout 4s)
+            try:
+                await asyncio.wait_for(asyncio.to_thread(self._refresh_kelly_history), timeout=4.0)
+            except asyncio.TimeoutError:
+                logging.warning("[Engine] ⏱️ Timeout (4s) sur refresh Kelly history — historique non rafraîchi ce cycle.")
+            except Exception as e:
+                logging.error(f"[Engine] Erreur refresh Kelly history: {e}")
 
-            # Vérification du passage à minuit (Daily Summary Telegram)
-            self._check_daily_summary()
+            # Vérification du passage à minuit (Daily Summary Telegram) — offload thread → timeout 4s
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._check_daily_summary),
+                    timeout=4.0
+                )
+            except asyncio.TimeoutError:
+                logging.warning("[Engine] ⏱️ Timeout (4s) sur daily summary — reporté au prochain cycle.")
+            except Exception as e:
+                logging.error(f"[Engine] Erreur daily summary: {e}")
 
             # ── Exécution Parallèle (Zero Latency) ────────────────────────────
             tasks = []
@@ -374,8 +392,19 @@ class Engine:
 
         pip_size = StrategyBase.get_pip_size(symbol)
         
-        # Récupération du spread en temps réel et contraintes de volume
-        sym_info = self.connector.get_symbol_info(symbol)
+        # Récupération du spread en temps réel et contraintes de volume (offload MT5 → timeout 4s)
+        try:
+            sym_info = await asyncio.wait_for(
+                asyncio.to_thread(self.connector.get_symbol_info, symbol),
+                timeout=4.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[Engine] ⏱️ Timeout (4s) sur get_symbol_info({symbol}) — valeurs par défaut de spread/volumes.")
+            sym_info = None
+        except Exception as e:
+            logging.warning(f"[Engine] Erreur get_symbol_info({symbol}): {e}")
+            sym_info = None
+
         current_spread_pips = 1.0  # Valeur par défaut
         min_vol = 0.01
         max_vol = 100.0
@@ -422,17 +451,24 @@ class Engine:
         except ImportError:
             pass
 
-        # SQLAlchemy offloaded to thread
-        volume = await asyncio.to_thread(
-            self.position_sizer.compute_volume,
-            validated_signal,
-            self.state_manager.account,
-            self._get_pip_value(symbol),
-            validated_signal.sl_pips,
-            min_vol,
-            max_vol,
-            vol_step
-        )
+        # SQLAlchemy offloaded to thread — timeout 4s strict
+        try:
+            volume = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.position_sizer.compute_volume,
+                    validated_signal,
+                    self.state_manager.account,
+                    self._get_pip_value(symbol, sym_info),
+                    validated_signal.sl_pips,
+                    min_vol,
+                    max_vol,
+                    vol_step
+                ),
+                timeout=4.0
+            )
+        except asyncio.TimeoutError:
+            logging.warning(f"[Engine] ⏱️ Timeout (4s) sur compute_volume({symbol}) — signal ignoré.")
+            return
 
         # 7. Convertir SL/TP pips → prix absolus pour MT5
         sl_price, tp_price = self._compute_sl_tp_prices(
@@ -660,6 +696,7 @@ class Engine:
                             trades_found_in_cache = True
 
             # 2. Si non trouvé dans le cache, interroger connector.get_history_deals
+            #    (appel exécuté hors de la boucle principale — cf. _check_daily_summary)
             if not trades_found_in_cache:
                 deals = None
                 try:
@@ -768,9 +805,14 @@ class Engine:
                 self.connector.modify_position(p.ticket, p.symbol, new_sl)
                 p.sl = new_sl  # Maj de l'état local
 
-    def _get_pip_value(self, symbol: str) -> float:
-        """Retourne la valeur dynamique en $ d'un 'pip' (10 points) selon MT5, en mode Thread-Safe."""
-        info = self.connector.get_symbol_info(symbol)
+    def _get_pip_value(self, symbol: str, info=None) -> float:
+        """
+        Retourne la valeur dynamique en $ d'un 'pip' (10 points) selon MT5.
+        `info` (déjà récupéré via get_symbol_info) est réutilisé pour éviter tout
+        second appel MT5 bloquant depuis la boucle d'événements.
+        """
+        if info is None:
+            info = self.connector.get_symbol_info(symbol)
         if not info:
             return 10.0
             
@@ -818,8 +860,14 @@ class Engine:
         while self.running:
             try:
                 if not self.kill_switch.is_triggered:
-                    # Offload au thread pour ne pas bloquer l'event loop avec les appels réseau MT5
-                    await asyncio.to_thread(self._apply_trailing_stops)
+                    # Offload au thread pour ne pas bloquer l'event loop avec les appels réseau MT5 — timeout 4s strict
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(self._apply_trailing_stops),
+                            timeout=4.0
+                        )
+                    except asyncio.TimeoutError:
+                        logging.warning("[Engine] ⏱️ Timeout (4s) sur trailing stop worker — modification SL ignorée ce tour.")
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -837,16 +885,27 @@ class Engine:
                 # Attend un ordre de la queue
                 payload = await self.order_queue.get()
                 
-                # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent)
-                result = await asyncio.to_thread(
-                    self.connector.execute_order,
-                    payload['symbol'],
-                    payload['direction'],
-                    payload['volume'],
-                    payload['sl_price'],
-                    payload['tp_price'],
-                    payload['magic']
-                )
+                # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent) — timeout 4s strict
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.connector.execute_order,
+                            payload['symbol'],
+                            payload['direction'],
+                            payload['volume'],
+                            payload['sl_price'],
+                            payload['tp_price'],
+                            payload['magic']
+                        ),
+                        timeout=4.0
+                    )
+                except asyncio.TimeoutError:
+                    logging.warning(
+                        f"[Engine] ⏱️ Timeout (4s) sur exécution ordre {payload['symbol']} — "
+                        "ordre abandonné, prochain ordre traité."
+                    )
+                    self.order_queue.task_done()
+                    continue
 
                 if result:
                     logging.info(
