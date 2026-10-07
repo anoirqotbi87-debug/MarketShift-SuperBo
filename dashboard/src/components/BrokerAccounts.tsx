@@ -70,10 +70,22 @@ function toCard(acc: BrokerAccount): AccountCard {
 }
 
 /**
- * URL officielle MT5 Web : https://web.metatrader.app/terminal
- * Serveur et login pré-remplis (paramètres servers/trade_server/login), langue fr.
+ * URL officielle MT5 Web adaptée par courtier :
+ * - XM : https://webtrader.xm.com/ (terminal MT5 officiel hébergé sous licence XM avec serveurs réels débloqués)
+ * - Exness : https://my.exness.com/webtrading/
+ * - Fallback : https://web.metatrader.app/terminal
  */
-export function getWebTraderUrl(_brokerName: string, server: string, login: number): string {
+export function getWebTraderUrl(brokerName: string, server: string, login: number): string {
+  const isXM = (brokerName || "").toLowerCase().includes("xm") || (server || "").toLowerCase().includes("xm");
+  const isExness = (brokerName || "").toLowerCase().includes("exness") || (server || "").toLowerCase().includes("exness");
+
+  if (isXM) {
+    return "https://webtrader.xm.com/";
+  }
+  if (isExness) {
+    return "https://my.exness.com/webtrading/";
+  }
+
   const params = new URLSearchParams();
   if (server) {
     params.set("servers", server);
