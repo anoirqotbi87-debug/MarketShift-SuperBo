@@ -52,10 +52,17 @@ export default function ActivePositions({ positions }: ActivePositionsProps) {
             {positions.map((p) => {
               const isBuy = p.type === "BUY";
               const pnlColor = p.pnl >= 0 ? "text-emerald-400" : "text-rose-400";
+              const sym = p.symbol.toUpperCase();
+              let beTolerance = p.openPrice * 0.0005; // 0.05% de base
+              if (sym.includes("BTC")) beTolerance = 50.0;
+              else if (sym.includes("GOLD") || sym.includes("XAU")) beTolerance = 1.0;
+              else if (sym.includes("JPY")) beTolerance = 0.05;
+              else if (sym.includes("EUR") || sym.includes("GBP")) beTolerance = 0.0003;
+
               const breakeven =
                 p.stopLoss > 0 &&
                 (isBuy ? p.currentPrice - p.openPrice >= 0 : p.openPrice - p.currentPrice >= 0) &&
-                Math.abs(p.stopLoss - p.openPrice) < 0.0001;
+                Math.abs(p.stopLoss - p.openPrice) <= beTolerance;
               return (
                 <tr key={p.ticket} className="hover:bg-zinc-800/30">
                   <td className="px-4 py-2.5 font-mono text-xs text-zinc-500">{p.ticket}</td>

@@ -138,7 +138,7 @@ export default function Sidebar({
   // Version mobile : drawer
   if (mobileOpen) {
     return (
-      <div className="fixed inset-0 z-40 flex lg:hidden">
+      <div className="fixed inset-0 z-[70] flex lg:hidden">
         <div className="w-64 border-r border-zinc-800 bg-zinc-950" onClick={onCloseMobile}>
           <button
             onClick={onCloseMobile}

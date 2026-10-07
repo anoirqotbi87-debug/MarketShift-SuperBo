@@ -13,11 +13,11 @@ export default function EmergencyModal({ open, onClose, onConfirm }: EmergencyMo
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[50] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-md p-6 shadow-2xl"
+        className="card relative z-[60] w-full max-w-md p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

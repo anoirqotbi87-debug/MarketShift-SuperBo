@@ -587,8 +587,8 @@ function ConnectModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-10 lg:pt-16">
-      <div className="w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+    <div className="fixed inset-0 z-[50] flex items-start justify-center overflow-y-auto bg-black/70 p-4 pt-10 lg:pt-16">
+      <div className="relative z-[60] w-full max-w-lg rounded-xl border border-zinc-800 bg-zinc-950 shadow-2xl">
         {/* En-tête */}
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
           <div className="flex items-center gap-2">

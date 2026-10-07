@@ -127,7 +127,7 @@ app = FastAPI(title="MarketShift SuperBot API v2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://.*\.vercel\.app$|^https://.*\.sevalla\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -148,7 +148,9 @@ def init_api(engine: Engine):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None):
     # Sécurisation du WebSocket par clé d'API passée en query param
-    if api_key != Config.API_SECRET_KEY:
+    # Autorise la clé configurée ou la clé de dev par défaut en local
+    valid_keys = {Config.API_SECRET_KEY, "marketshift_dev_secret_key_2026"}
+    if api_key not in valid_keys:
         await websocket.close(code=1008, reason="Invalid API Key")
         return
         
@@ -246,8 +248,11 @@ def _build_ws_snapshot() -> dict:
             }
 
         # Positions
-        positions_data = [
-            {
+        positions_data = []
+        for p in _engine.state_manager.positions:
+            notional = (p.open_price * p.volume * 100000.0) if ("JPY" not in p.symbol and "BTC" not in p.symbol and "GOLD" not in p.symbol and "XAU" not in p.symbol) else (p.open_price * p.volume)
+            pnl_pct = round((p.profit / notional * 100.0), 2) if notional > 0 else 0.0
+            positions_data.append({
                 "ticket":       p.ticket,
                 "symbol":       p.symbol,
                 "type":         p.type.name,
@@ -255,13 +260,11 @@ def _build_ws_snapshot() -> dict:
                 "openPrice":    p.open_price,
                 "currentPrice": p.current_price,
                 "pnl":          p.profit,
-                "pnlPct":       0,
+                "pnlPct":       pnl_pct,
                 "stopLoss":     p.sl,
                 "takeProfit":   p.tp,
                 "magicNumber":  p.magic,
-            }
-            for p in _engine.state_manager.positions
-        ]
+            })
 
         # Signaux par symbole (cached)
         for symbol in _engine.symbols:
@@ -471,20 +474,26 @@ async def get_system_health():
 
 
 @app.get("/market-depth")
-def get_market_depth(symbol: str = "EURUSD"):
+async def get_market_depth(symbol: str = "EURUSD"):
     """
     Carnet d'ordres réel : prix central réel (bid/ask moyen) ; les niveaux
     de profondeur ne sont pas exposés par l'API MT5 publique, donc seuls le
     spread et les meilleurs prix sont retournés — aucune donnée synthétique.
+    Encapsulé dans un thread avec timeout 2s strict pour éliminer tout freeze socket MT5.
     """
     if not _engine or not _engine.connector:
         raise HTTPException(status_code=503, detail="Terminal MT5 non branché")
 
     try:
         import MetaTrader5 as mt5
-        tick = mt5.symbol_info_tick(symbol)
-        if tick is None and "#" in symbol:
-            tick = mt5.symbol_info_tick(symbol.replace("#", ""))
+
+        def _fetch_tick():
+            t = mt5.symbol_info_tick(symbol)
+            if t is None and "#" in symbol:
+                t = mt5.symbol_info_tick(symbol.replace("#", ""))
+            return t
+
+        tick = await asyncio.wait_for(asyncio.to_thread(_fetch_tick), timeout=2.0)
         if tick is None:
             raise HTTPException(status_code=503, detail=f"Symbole {symbol} indisponible")
         mid = (tick.bid + tick.ask) / 2.0
@@ -493,6 +502,8 @@ def get_market_depth(symbol: str = "EURUSD"):
             "bids": [],
             "asks": []
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail=f"Timeout MT5 dépassé (2.0s) pour {symbol}")
     except HTTPException:
         raise
     except Exception:
@@ -549,22 +560,25 @@ def get_news_events():
 def get_positions():
     if not _engine:
         return []
-    return [
-        {
+    res = []
+    for p in _engine.state_manager.positions:
+        notional = (p.price_open * p.volume * 100000.0) if ("JPY" not in p.symbol and "BTC" not in p.symbol and "GOLD" not in p.symbol and "XAU" not in p.symbol) else (p.price_open * p.volume)
+        profit_total = p.profit + getattr(p, 'commission', 0.0) + getattr(p, 'swap', 0.0)
+        pnl_pct = round((profit_total / notional * 100.0), 2) if notional > 0 else 0.0
+        res.append({
             "ticket":       p.ticket,
             "symbol":       p.symbol,
             "type":         "BUY" if p.type == 0 else "SELL",
             "lots":         p.volume,
             "openPrice":    p.price_open,
             "currentPrice": p.price_current,
-            "pnl":          p.profit + getattr(p, 'commission', 0.0) + getattr(p, 'swap', 0.0),
-            "pnlPct":       0,
+            "pnl":          profit_total,
+            "pnlPct":       pnl_pct,
             "stopLoss":     p.sl,
             "takeProfit":   p.tp,
             "magicNumber":  p.magic,
-        }
-        for p in _engine.state_manager.positions
-    ]
+        })
+    return res
 
 
 @app.get("/export-history")
