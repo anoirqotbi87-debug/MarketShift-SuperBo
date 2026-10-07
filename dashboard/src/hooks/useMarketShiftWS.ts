@@ -14,7 +14,7 @@ import { getConnection } from "@/lib/api";
  */
 
 const WS_FALLBACK = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "marketshift_dev_secret_key_2026";
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000];
 

@@ -368,6 +368,22 @@ export interface BenchmarkPoint {
   benchmarkEquity: number;
 }
 
+export interface ClosedDeal {
+  ticket: number;
+  symbol: string;
+  type: "BUY" | "SELL";
+  lots: number;
+  openPrice: number;
+  closePrice: number;
+  pnl: number;
+  openTime: string;
+  closeTime: string;
+  closeReason: string;
+  mlConfidence: number;
+  tags: string[];
+  signalReason: string;
+}
+
 export interface HistoryBar {
   time: string;
   open: number;

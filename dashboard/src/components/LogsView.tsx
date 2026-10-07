@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, TerminalSquare } from "lucide-react";
 import type { EngineLog, LogLevel } from "@/types/trading";
+import { fetchLogs } from "@/lib/api";
 
 type FilterKey = "ALL" | LogLevel;
 
@@ -12,24 +13,52 @@ interface LogsViewProps {
   logs: EngineLog[];
 }
 
-/** Vue terminal — journal complet filtrable. */
+/** Vue terminal — journal complet filtrable avec buffer glissant consolidé (jusqu'à 200 logs). */
 export default function LogsView({ logs }: LogsViewProps) {
   const [filter, setFilter] = useState<FilterKey>("ALL");
   const [query, setQuery] = useState("");
+  const [buffer, setBuffer] = useState<EngineLog[]>(logs);
+
+  // Chargement initial des 200 logs réels du backend
+  useEffect(() => {
+    let cancelled = false;
+    fetchLogs().then((res) => {
+      if (!cancelled && res.length > 0) {
+        setBuffer((prev) => {
+          const map = new Map<string, EngineLog>();
+          [...res, ...prev].forEach((l) => map.set(`${l.time}-${l.message}`, l));
+          return Array.from(map.values()).slice(-200);
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Fusion continue avec les logs reçus en temps réel via WS
+  useEffect(() => {
+    if (logs.length === 0) return;
+    setBuffer((prev) => {
+      const map = new Map<string, EngineLog>();
+      [...prev, ...logs].forEach((l) => map.set(`${l.time}-${l.message}`, l));
+      return Array.from(map.values()).slice(-200);
+    });
+  }, [logs]);
 
   const filtered = useMemo(() => {
-    return logs.filter((l) => {
+    return buffer.filter((l) => {
       if (filter !== "ALL" && l.level !== filter) return false;
       if (query && !l.message.toLowerCase().includes(query.toLowerCase())) return false;
       return true;
     });
-  }, [logs, filter, query]);
+  }, [buffer, filter, query]);
 
   const counts = useMemo(() => {
-    const c: Record<FilterKey, number> = { ALL: logs.length, DEBUG: 0, INFO: 0, WARNING: 0, ERROR: 0 };
-    for (const l of logs) c[l.level] += 1;
+    const c: Record<FilterKey, number> = { ALL: buffer.length, DEBUG: 0, INFO: 0, WARNING: 0, ERROR: 0 };
+    for (const l of buffer) c[l.level] += 1;
     return c;
-  }, [logs]);
+  }, [buffer]);
 
   return (
     <div className="card flex h-full flex-col p-4">
@@ -39,7 +68,7 @@ export default function LogsView({ logs }: LogsViewProps) {
           Journal du moteur
         </h3>
         <span className="ml-auto font-mono text-[10px] text-zinc-500">
-          {filtered.length} / {logs.length} entrées
+          {filtered.length} / {buffer.length} entrées
         </span>
       </div>
 

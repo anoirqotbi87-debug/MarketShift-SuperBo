@@ -39,7 +39,7 @@ import type {
 
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
 const ENV_WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "marketshift_dev_secret_key_2026";
 
 const STORAGE_KEY = "marketshift.connection";
 
@@ -185,6 +185,11 @@ export async function fetchSymbols(): Promise<SymbolOverview[]> {
   return Array.isArray(data) ? data : [];
 }
 
+export async function fetchLogs(): Promise<import("@/types/trading").EngineLog[]> {
+  const data = await request<import("@/types/trading").EngineLog[]>("/logs");
+  return Array.isArray(data) ? data : [];
+}
+
 /** POST /control — kill switch, reset, pause, resume. */
 export async function sendControlCommand(action: "kill" | "reset_kill" | "pause" | "resume") {
   return request<{ message?: string; error?: string }>("/control", {
@@ -323,11 +328,21 @@ export async function fetchBenchmarkCurve(
   return Array.isArray(data) ? data : [];
 }
 
+export async function fetchClosedDeals(): Promise<import("@/types/trading").ClosedDeal[]> {
+  const data = await request<import("@/types/trading").ClosedDeal[]>("/history");
+  return Array.isArray(data) ? data : [];
+}
+
 export async function fetchHistory(symbol = "EURUSD", timeframe = "M15", bars = 200): Promise<HistoryBar[]> {
-  const data = await request<HistoryBar[]>(
+  const data = await request<any[]>(
     `/history?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&num_bars=${bars}`,
   );
-  return Array.isArray(data) ? data : [];
+  if (!Array.isArray(data)) return [];
+  // Si le backend renvoie des deals au lieu de bougies, on ne crash pas
+  if (data.length > 0 && "openPrice" in data[0] && !("close" in data[0])) {
+    return [];
+  }
+  return data as HistoryBar[];
 }
 
 export async function retrainMlModel(): Promise<{ status?: string; error?: string } | null> {
