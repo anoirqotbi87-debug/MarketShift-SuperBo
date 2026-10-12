@@ -10,14 +10,32 @@ __pycache__/
 .env.local
 .env.*.local
 
+# Bases de données SQLite & transactions
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Données & Dumps historiques
+*.csv
+EURUSD_historical_data.csv
+*_historical_data.csv
+data/
+
 # Modèles ML sauvegardés
 *.pkl
 *.joblib
 *.model
 
-# Logs
+# Logs et rapports d'analyse/debug
 *.log
 logs/
+*_logs.txt
+android_log*.txt
+debug_*.txt
+analysis_out.txt
+test_*.txt
 
 # Node / UI
 ui/node_modules/
