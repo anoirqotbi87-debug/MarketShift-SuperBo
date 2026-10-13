@@ -119,6 +119,7 @@ try:
     Config = AppConfig()
     if Config.ENVIRONMENT.lower() not in ("development", "dev", "test") and not Config.API_SECRET_KEY:
         import sys
+        import os
         if "pytest" not in sys.modules and not os.getenv("PYTEST_CURRENT_TEST"):
             logging.critical("CRITICAL SECURITY ERROR: API_SECRET_KEY must be set in production/staging environment.")
             # Refuser en production réelle hors exécution de tests

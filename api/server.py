@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from infrastructure.config import Config
 from application.engine import Engine
-from core.interfaces import OrderType
+from core.interfaces import OrderType, Signal
 from infrastructure.database import SessionLocal, get_db
 from infrastructure.credential_vault import encrypt_secret, decrypt_secret
 from infrastructure import models  # noqa: F401  — enregistre les tables SQLAlchemy (create_all)

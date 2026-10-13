@@ -21,6 +21,7 @@ Sortie : Code de retour 0 si tous les seuils sont respectés (< 10 ms), code 1 e
 import sys
 import time
 import statistics
+import pytest
 from typing import List, Dict, Any
 
 try:
