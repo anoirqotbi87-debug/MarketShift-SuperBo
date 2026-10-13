@@ -32,10 +32,17 @@ data/
 *.log
 logs/
 *_logs.txt
+log_*.txt
+*.log.txt
 android_log*.txt
 debug_*.txt
 analysis_out.txt
 test_*.txt
+temp_*.txt
+npm_*.txt
+grid_search_cache.json
+screen*.png
+scratch/
 
 # Node / UI
 ui/node_modules/
