@@ -30,6 +30,7 @@ from infrastructure.database import SessionLocal, get_db
 from infrastructure.credential_vault import encrypt_secret, decrypt_secret
 from infrastructure import models  # noqa: F401  — enregistre les tables SQLAlchemy (create_all)
 from utils.env_writer import atomic_update_env
+from core.execution_metrics import execution_metrics
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger en mémoire — stocke les 200 derniers logs
@@ -382,6 +383,7 @@ def get_status():
         "daily_start_balance": cb_metrics.get("daily_start_balance", 0.0),
         "current_daily_pnl_pct": cb_metrics.get("current_daily_pnl_pct", 0.0),
         "high_water_mark": cb_metrics.get("high_water_mark", 0.0),
+        "execution_metrics": execution_metrics.get_metrics(),
     }
 
 
@@ -927,6 +929,14 @@ class CloseRequest(BaseModel):
 def close_trade(req: CloseRequest, api_key: str = Depends(verify_api_key)):
     if not _engine:
         raise HTTPException(status_code=503, detail="Engine offline")
+    # M-14: Vérification d'appartenance du ticket aux positions ouvertes du compte actif
+    open_positions = getattr(_engine.state_manager, "positions", [])
+    ticket_found = any(getattr(p, "ticket", None) == req.ticket for p in open_positions)
+    if not ticket_found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Position #{req.ticket} non trouvée parmi les positions ouvertes du compte actif.",
+        )
     success = _engine.connector.close_position(req.ticket)
     if not success:
         raise HTTPException(status_code=500, detail="Échec de la clôture")

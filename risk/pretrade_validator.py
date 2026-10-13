@@ -4,6 +4,7 @@ from typing import Optional
 from core.interfaces import Signal, AccountInfo
 from infrastructure.config import Config
 from infrastructure.models import TradeRecord
+from core.execution_metrics import execution_metrics
 
 class PreTradeValidator:
     """
@@ -33,6 +34,7 @@ class PreTradeValidator:
         
         if not account:
             logging.error("[Validator] Rejet: Impossible de récupérer les infos du compte.")
+            execution_metrics.record_pretrade_rejection("ACCOUNT_UNAVAILABLE")
             return False
 
         # --- NOUVEAU: Verrou de Corrélation ---
@@ -49,6 +51,7 @@ class PreTradeValidator:
                         sig_type = 0 if signal.direction.name == "BUY" else 1
                         if pos.type == sig_type:
                             logging.warning(f"[Validator] 🛡️ Rejet: Double exposition détectée. {pos.symbol} déjà ouvert, on ignore {signal.symbol}.")
+                            execution_metrics.record_pretrade_rejection("CORRELATION_DOUBLE_EXPOSURE")
                             return False
 
         # 1. Vérification du Cooldown (Revenge Trading)
@@ -56,12 +59,14 @@ class PreTradeValidator:
             remaining = int((self._cooldown_until - time.time()) / 60)
             logging.warning(f"[Validator] 🚫 Rejet: Bot en Cooldown (Revenge Trading Protection). Attente: {remaining} min.")
             logging.debug(f"[Validator] [{signal.symbol}] cooldown_until={self._cooldown_until:.0f} | now={time.time():.0f}")
+            execution_metrics.record_pretrade_rejection("COOLDOWN_REVENGE_TRADING")
             return False
 
         # 2. Vérification de la Marge
         if account.margin_level > 0 and account.margin_level < self.MIN_MARGIN_LEVEL:
             logging.warning(f"[Validator] 🚫 Rejet: Niveau de marge critique ({account.margin_level}% < {self.MIN_MARGIN_LEVEL}%)")
             logging.debug(f"[Validator] [{signal.symbol}] margin_level={account.margin_level:.1f}% seuil={self.MIN_MARGIN_LEVEL}%")
+            execution_metrics.record_pretrade_rejection("CRITICAL_MARGIN_LEVEL")
             return False
 
         # 3. Validation du Spread (dynamique selon le symbole)
@@ -83,6 +88,7 @@ class PreTradeValidator:
                 f"[Validator] 🚫 Rejet: Spread anormalement élevé sur {signal.symbol} "
                 f"({current_spread_pips:.1f} pips > {max_spread} pips). Protection contre le Slippage/Rollover."
             )
+            execution_metrics.record_pretrade_rejection("HIGH_SPREAD")
             return False
 
         # 4. Confiance ML
@@ -93,6 +99,7 @@ class PreTradeValidator:
         )
         if signal.confidence < ml_threshold:
             logging.warning(f"[Validator] 🚫 Rejet: Confiance ML insuffisante ({signal.confidence:.2f} < {ml_threshold:.2f})")
+            execution_metrics.record_pretrade_rejection("LOW_ML_CONFIDENCE")
             return False
 
         # 5. Rate Limiting (Knight Capital Protection)
@@ -105,6 +112,7 @@ class PreTradeValidator:
             logging.warning(
                 f"[Validator] 🚫 Rejet: Cooldown Anti-Rafale actif. Veuillez patienter 5 secondes entre chaque ordre."
             )
+            execution_metrics.record_pretrade_rejection("RATE_LIMIT_BURST")
             return False
             
         # Ne garder que les timestamps de la dernière minute
@@ -117,6 +125,7 @@ class PreTradeValidator:
                 f"[Validator] 🛑 REJET CRITIQUE: Rate Limit dépassé ({self.MAX_ORDERS_PER_MINUTE} ordres/min). "
                 "Suspicion de boucle algorithmique infinie !"
             )
+            execution_metrics.record_pretrade_rejection("RATE_LIMIT_MINUTE")
             return False
 
         # --- Si tout est bon, on accepte le trade et on enregistre le timestamp ---

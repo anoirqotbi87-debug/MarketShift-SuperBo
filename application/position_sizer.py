@@ -36,10 +36,24 @@ class PositionSizer:
         logging.info("[PositionSizer] Initialisé avec Kelly Fractionnaire (25%)")
         
         if self.db:
-            # self._load_from_db() # Désactivé pour éviter de mélanger les comptes. L'Engine injectera l'historique MT5 réel au démarrage.
+            # M-17 ARCHITECTURAL NOTE:
+            # _load_from_db() n'est intentionnellement pas appelé au constructeur (__init__)
+            # afin d'éviter la contamination croisée d'historique multi-comptes : la base SQLite
+            # locale peut contenir des enregistrements de comptes antérieurs (ex: démo vs réel).
+            # L'Engine charge et injecte dynamiquement l'historique officiel du compte actif
+            # connecté via `update_history()` dès l'initialisation de la session de trading.
             pass
 
     def _load_from_db(self):
+        """
+        Charge l'historique des trades persistés depuis la table SQLite TradeRecord.
+        
+        Note de gouvernance : Cette méthode est conservée comme mécanisme de reprise à froid
+        ou pour des tests hors-ligne nécessitant un historique synthétique. En fonctionnement
+        standard en ligne, la source de vérité prioritaire reste les deals MT5 injectés
+        via `update_history(closed_trades)` par l'Engine pour garantir l'étanchéité stricte
+        entre différents logins/comptes.
+        """
         try:
             from infrastructure.models import TradeRecord
             records = self.db.query(TradeRecord).filter(TradeRecord.profit != None).all()
