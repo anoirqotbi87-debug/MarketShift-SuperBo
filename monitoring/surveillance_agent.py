@@ -123,18 +123,8 @@ class SurveillanceAgent:
     def _update_env(self, key: str, value: str):
         try:
             import os
+            from utils.env_writer import atomic_update_env
             env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-            if not os.path.exists(env_path):
-                return
-                
-            with open(env_path, "r") as f:
-                lines = f.readlines()
-                
-            with open(env_path, "w") as f:
-                for line in lines:
-                    if line.startswith(f"{key}="):
-                        f.write(f"{key}={value}\n")
-                    else:
-                        f.write(line)
+            atomic_update_env({key: value}, env_path=env_path)
         except Exception as e:
             logging.error(f"[SurveillanceAgent] Erreur mise à jour .env : {e}")
