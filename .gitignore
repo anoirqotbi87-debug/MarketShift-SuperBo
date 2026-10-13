@@ -34,6 +34,8 @@ logs/
 *_logs.txt
 log_*.txt
 *.log.txt
+log_new.txt
+*log*.txt
 android_log*.txt
 debug_*.txt
 analysis_out.txt

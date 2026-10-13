@@ -25,6 +25,7 @@ from risk.dynamic_trailing_stop import DynamicTrailingStop
 from core.interfaces import IBrokerConnector, OrderType, Signal
 from core.news_filter import NewsFilter
 from infrastructure.config import Config
+from core.execution_metrics import execution_metrics
 
 try:
     from infrastructure.telegram_notifier import TelegramNotifier, telegram_notifier
@@ -945,6 +946,8 @@ class Engine:
             try:
                 # Attend un ordre de la queue
                 payload = await self.order_queue.get()
+                execution_metrics.record_order_attempt()
+                _t_start = time.perf_counter()
                 
                 # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent) — timeout 4s strict
                 try:
@@ -961,6 +964,8 @@ class Engine:
                         timeout=4.0
                     )
                 except asyncio.TimeoutError:
+                    _latency_ms = (time.perf_counter() - _t_start) * 1000.0
+                    execution_metrics.record_order_execution(_latency_ms, success=False)
                     import time as _t
                     logging.warning(
                         f"[Engine] ⏱️ Timeout (4s) sur exécution ordre {payload['symbol']} — "
@@ -972,13 +977,21 @@ class Engine:
                     self.order_queue.task_done()
                     continue
 
+                _latency_ms = (time.perf_counter() - _t_start) * 1000.0
                 if result:
+                    _pip_size = StrategyBase.get_pip_size(payload['symbol'])
+                    _exec_price = float(result.get('price', 0.0))
+                    _req_price = float(payload.get('requested_price', _exec_price))
+                    _slippage_pips = abs(_exec_price - _req_price) / _pip_size if _pip_size > 0 else 0.0
+                    execution_metrics.record_order_execution(_latency_ms, slippage_pips=_slippage_pips, success=True)
                     if 'ticket' in result:
                         self._known_position_tickets.add(result['ticket'])
                     logging.info(
                         f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
-                        f"Prix: {result['price']} | Volume: {result['volume']}"
+                        f"Prix: {result['price']} | Volume: {result['volume']} | Latence: {_latency_ms:.1f}ms"
                     )
+                else:
+                    execution_metrics.record_order_execution(_latency_ms, success=False)
                     
                     # Trace d'Audit MiFID II
                     try:

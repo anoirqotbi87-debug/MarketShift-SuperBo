@@ -1,5 +1,5 @@
 import logging
-from typing import List
+from typing import List, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -115,18 +115,67 @@ class AppConfig(BaseSettings):
             except ValueError: pass
         return self.ML_CONFIDENCE_THRESHOLD
 
+    @property
+    def is_real_broker_configured(self) -> bool:
+        """Détecte si un compte de courtier réel (non-démo) est configuré."""
+        login, password, server = self.get_broker_credentials()
+        if login and password:
+            server_str = str(server or "").lower()
+            if "demo" not in server_str and ("real" in server_str or "live" in server_str or server_str):
+                return True
+        return False
+
+    def is_secret_robust(self, secret: Optional[str]) -> bool:
+        """Vérifie qu'une clé API a au moins 32 caractères et n'est pas un placeholder."""
+        if not secret:
+            return False
+        s = secret.strip()
+        if len(s) < 32:
+            return False
+        lower_s = s.lower()
+        placeholders = {
+            "your_api_secret_key",
+            "your_api_secret_key_here",
+            "your_api_key_here",
+            "marketshift_dev_secret_key_2026",
+            "change_me",
+            "secret",
+            "admin",
+            "password",
+            "12345678",
+            "your_mt5_password_here",
+            "your_mt5_login_here",
+        }
+        if lower_s in placeholders or any(p in lower_s for p in ("your_api", "placeholder", "changeme")):
+            return False
+        return True
+
+    def validate_security_failfast(self) -> None:
+        """
+        Contrôle fail-fast : exige une API_SECRET_KEY robuste (>= 32 caractères, non-placeholder)
+        dès que ENVIRONMENT est en production/staging OU dès qu'un compte broker non-démo (réel) est configuré,
+        indépendamment du flag SIMULATION_MODE.
+        """
+        is_prod_staging = self.ENVIRONMENT.lower() in ("production", "staging", "prod")
+        is_real = self.is_real_broker_configured
+
+        if is_prod_staging or is_real:
+            if not self.is_secret_robust(self.API_SECRET_KEY):
+                reason = "en production/staging" if is_prod_staging else "avec un compte broker réel (non-démo)"
+                masked = f"{self.API_SECRET_KEY[:4]}..." if self.API_SECRET_KEY else "vide"
+                msg = (
+                    f"CRITICAL SECURITY ERROR: Une API_SECRET_KEY robuste (>= 32 caractères, non-placeholder) "
+                    f"est strictement obligatoire {reason}. Valeur actuelle : {masked}."
+                )
+                logging.critical(msg)
+                raise ValueError(msg)
+
 try:
     Config = AppConfig()
-    if Config.ENVIRONMENT.lower() not in ("development", "dev", "test") and not Config.API_SECRET_KEY:
-        import sys
-        import os
-        if "pytest" not in sys.modules and not os.getenv("PYTEST_CURRENT_TEST"):
-            logging.critical("CRITICAL SECURITY ERROR: API_SECRET_KEY must be set in production/staging environment.")
-            # Refuser en production réelle hors exécution de tests
-            if not Config.SIMULATION_MODE:
-                raise ValueError("CRITICAL SECURITY ERROR: API_SECRET_KEY must be set in production/staging environment.")
-            else:
-                logging.warning("[Config] Mode SIMULATION actif : API_SECRET_KEY manquante en environnement non-dev.")
+    import sys
+    import os
+    if "pytest" not in sys.modules and not os.getenv("PYTEST_CURRENT_TEST"):
+        Config.validate_security_failfast()
 except Exception as e:
     logging.critical(f"Erreur fatale de configuration (.env invalide) : {e}")
     raise
