@@ -194,7 +194,10 @@ export async function fetchLogs(): Promise<import("@/types/trading").EngineLog[]
 export async function sendControlCommand(action: "kill" | "reset_kill" | "pause" | "resume") {
   return request<{ message?: string; error?: string }>("/control", {
     method: "POST",
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ 
+      action,
+      ...(action === "reset_kill" ? { confirm_token: "RESET_KILL_SWITCH" } : {})
+    }),
   });
 }
 

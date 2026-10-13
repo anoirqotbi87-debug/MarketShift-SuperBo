@@ -377,12 +377,13 @@ def get_status():
 
 class ControlCommand(BaseModel):
     action: str
+    confirm_token: Optional[str] = None
 
 
 @app.post("/control")
 def control_bot(cmd: ControlCommand, api_key: str = Depends(verify_api_key)):
     if not _engine:
-        return {"error": "Engine offline"}
+        raise HTTPException(status_code=503, detail="Engine offline")
 
     if cmd.action == "pause":
         _engine.state_manager.pause()
@@ -394,10 +395,15 @@ def control_bot(cmd: ControlCommand, api_key: str = Depends(verify_api_key)):
         _engine.kill_switch.activate("MANUAL_TRIGGER_API")
         return {"message": "Kill Switch Activé !"}
     elif cmd.action == "reset_kill":
-        _engine.kill_switch.reset()
-        return {"message": "Kill Switch Désactivé."}
+        try:
+            _engine.kill_switch.reset(confirm_token=cmd.confirm_token)
+            return {"message": "Kill Switch Désactivé avec succès."}
+        except PermissionError as pe:
+            raise HTTPException(status_code=403, detail=str(pe))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erreur réarmement : {e}")
 
-    return {"error": "Action inconnue"}
+    raise HTTPException(status_code=422, detail="Action inconnue")
 
 
 @app.get("/account-information")

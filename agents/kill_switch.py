@@ -15,6 +15,7 @@ class KillSwitch:
         self.connector = connector
         self.notifier = notifier if notifier is not None else telegram_notifier
         self.is_triggered: bool = False
+        self.activated_at: float = 0.0
         self._lock: threading.Lock = threading.Lock()
 
     def activate(self, reason: str):
@@ -23,7 +24,9 @@ class KillSwitch:
             if self.is_triggered:
                 return
 
+            import time
             self.is_triggered = True
+            self.activated_at = time.time()
             logging.critical(f"⚠️ KILL SWITCH ACTIVÉ ⚠️ Raison: {reason}")
 
             pos_count = 0
@@ -63,9 +66,41 @@ class KillSwitch:
         except Exception as e:
             logging.error(f"KillSwitch: Erreur lors de la fermeture des positions: {e}")
 
-    def reset(self):
-        """Désactive le Kill Switch (Nécessite intervention manuelle/biométrique dans l'UI)"""
+    def reset(self, confirm_token: Optional[str] = None, min_cooldown_seconds: float = 60.0):
+        """
+        Désactive le Kill Switch.
+        Requiert une confirmation explicite (token 'RESET_KILL_SWITCH')
+        et un délai minimal de temporisation post-activation (60 secondes).
+        """
+        import time
         with self._lock:
-            logging.warning("Kill Switch réarmé.")
+            if not self.is_triggered:
+                logging.info("[KillSwitch] Déjà inactif.")
+                return True
+
+            if confirm_token != "RESET_KILL_SWITCH":
+                raise PermissionError("Confirmation invalide : le token 'RESET_KILL_SWITCH' est requis.")
+
+            elapsed = time.time() - self.activated_at
+            if elapsed < min_cooldown_seconds:
+                remaining = int(min_cooldown_seconds - elapsed)
+                raise PermissionError(
+                    f"Délai de sécurité actif : réarmement impossible avant {remaining}s après activation."
+                )
+
+            logging.critical("🚨 [KillSwitch] Réarmement manuel confirmé par l'opérateur autorisé.")
             self.is_triggered = False
+            self.activated_at = 0.0
+
+            if self.notifier:
+                try:
+                    self.notifier.notify_critical_event(
+                        "KILL_SWITCH_RESET",
+                        reason="Réarmement manuel autorisé",
+                        details="Le système reprend ses opérations sous surveillance."
+                    )
+                except Exception as notif_err:
+                    logging.error(f"KillSwitch: Erreur dispatch notification réarmement: {notif_err}")
+
+            return True
 
