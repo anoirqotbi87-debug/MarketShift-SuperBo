@@ -519,7 +519,12 @@ export function useMT5Connection(
             'Content-Type': 'application/json',
             'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || ''
           },
-          body: JSON.stringify({ symbol, direction })
+          body: JSON.stringify({ 
+            symbol, 
+            direction,
+            sl_pips: (riskConfig?.atrMultiplierSL ? riskConfig.atrMultiplierSL * 15.0 : 25.0),
+            tp_pips: (riskConfig?.atrMultiplierTP ? riskConfig.atrMultiplierTP * 15.0 : 45.0)
+          })
         });
 
         if (!res.ok) {
