@@ -863,7 +863,10 @@ class ApplySettingsPayload(BaseModel):
     symbol: Optional[str] = None
 
 @app.post("/apply-optimal-settings")
-def apply_optimal_settings(payload: ApplySettingsPayload):
+def apply_optimal_settings(
+    payload: ApplySettingsPayload,
+    api_key: str = Depends(verify_api_key)
+):
     import os
     env_path = ".env"
     lines = []
@@ -1083,14 +1086,17 @@ import io
 async def run_historical_backtest(
     file: UploadFile = File(...),
     symbol: str = Form("EURUSD"),
-    initial_capital: float = Form(10000.0)
+    initial_capital: float = Form(10000.0),
+    api_key: str = Depends(verify_api_key)
 ):
     """
     Exécute un backtest historique réel sur le CSV fourni par l'utilisateur.
     """
     try:
-        # Lire le contenu du fichier
+        # Lire le contenu du fichier (avec borne de sécurité 20 Mo)
         content = await file.read()
+        if len(content) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Taille du fichier supérieure à la limite autorisée (20 Mo).")
         
         # Charger avec Pandas (en essayant de deviner le format)
         try:
@@ -1112,12 +1118,14 @@ async def run_historical_backtest(
         report = tester.run(df, symbol)
         return report
         
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"[API] Erreur Backtest : {e}")
         return {"error": str(e)}
 
 @app.post("/ml/retrain")
-async def force_ml_retrain():
+async def force_ml_retrain(api_key: str = Depends(verify_api_key)):
     """Déclenche le ré-entraînement manuel."""
     if not _engine or not _engine.ml_trainer:
         return {"status": "error", "message": "Moteur ML non initialisé"}
@@ -1129,7 +1137,8 @@ async def force_ml_retrain():
 async def run_auto_optimizer(
     file: Optional[UploadFile] = File(None),
     symbol: str = Form("EURUSD#"),
-    initial_capital: float = Form(10000.0)
+    initial_capital: float = Form(10000.0),
+    api_key: str = Depends(verify_api_key)
 ):
     """
     Exécute le Grid Search Auto-Optimizer.
@@ -1138,6 +1147,8 @@ async def run_auto_optimizer(
     try:
         if file:
             content = await file.read()
+            if len(content) > 20 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Taille du fichier supérieure à la limite autorisée (20 Mo).")
             try:
                 df = pd.read_csv(io.StringIO(content.decode('utf-8')))
             except Exception:
