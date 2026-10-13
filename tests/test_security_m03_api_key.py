@@ -32,23 +32,23 @@ def test_verify_api_key_refuses_invalid_header_when_secret_set():
     client = TestClient(app)
     with patch.object(Config, "API_SECRET_KEY", "real_secure_token_abc123"):
         # Requête sans en-tête sur un endpoint protégé
-        res = client.post("/control", json={"action": "start"})
+        res = client.post("/control", json={"action": "pause"})
         assert res.status_code == 403
 
         # Requête avec l'ancienne clé dev
         res_dev = client.post(
             "/control",
-            json={"action": "start"},
+            json={"action": "pause"},
             headers={"X-API-Key": "marketshift_dev_secret_key_2026"}
         )
         assert res_dev.status_code == 403
 
         # Requête avec la vraie clé configurée
         with patch("api.server._engine") as mock_engine:
-            mock_engine.start = MagicMock()
+            mock_engine.state_manager.pause = MagicMock()
             res_ok = client.post(
                 "/control",
-                json={"action": "start"},
+                json={"action": "pause"},
                 headers={"X-API-Key": "real_secure_token_abc123"}
             )
             assert res_ok.status_code == 200
