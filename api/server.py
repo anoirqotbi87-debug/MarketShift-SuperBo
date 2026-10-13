@@ -366,12 +366,21 @@ async def verify_api_key(api_key_header: str = Security(api_key_header)):
 def get_status():
     if not _engine:
         return {"status": "offline"}
+    cb_metrics = (
+        _engine.circuit_breaker.get_metrics()
+        if hasattr(_engine, 'circuit_breaker') and hasattr(_engine.circuit_breaker, 'get_metrics')
+        else {}
+    )
     return {
         "status":      "paused" if _engine.state_manager.is_paused else "running",
         "kill_switch": _engine.kill_switch.is_triggered,
         "account":     _engine.state_manager.account.model_dump() if _engine.state_manager.account else None,
         "positions_count": len(_engine.state_manager.positions),
         "symbols":     _engine.symbols,
+        "circuit_breaker": cb_metrics,
+        "daily_start_balance": cb_metrics.get("daily_start_balance", 0.0),
+        "current_daily_pnl_pct": cb_metrics.get("current_daily_pnl_pct", 0.0),
+        "high_water_mark": cb_metrics.get("high_water_mark", 0.0),
     }
 
 
