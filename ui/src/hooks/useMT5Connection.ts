@@ -185,8 +185,8 @@ export function useMT5Connection(
   const wsUrl = React.useMemo(() => {
     let ip = riskConfig?.localBridgeIp || `${getApiBaseUrl()}`;
     let wsUrl = ip.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
-    // Append the local API Key for security
-    return wsUrl + '?api_key=marketshift_dev_secret_key_2026';
+    const key = import.meta.env.VITE_API_SECRET_KEY || '';
+    return key ? `${wsUrl}?api_key=${encodeURIComponent(key)}` : wsUrl;
   }, [riskConfig?.localBridgeIp]);
 
   const handleWsSnapshot = useCallback((data: WsSnapshot) => {
@@ -466,7 +466,7 @@ export function useMT5Connection(
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || ''
           },
           body: JSON.stringify(payload)
         });
@@ -517,7 +517,7 @@ export function useMT5Connection(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || ''
           },
           body: JSON.stringify({ symbol, direction })
         });
@@ -587,7 +587,7 @@ export function useMT5Connection(
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || 'marketshift_dev_secret_key_2026'
+            'X-API-Key': import.meta.env.VITE_API_SECRET_KEY || ''
           },
           body: JSON.stringify({ ticket })
         });

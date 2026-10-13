@@ -27,7 +27,7 @@ Ouvrir `http://localhost:3000`.
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend FastAPI (REST) |
 | `NEXT_PUBLIC_WS_URL` | `ws://localhost:8000/ws` | Flux WebSocket temps réel |
-| `NEXT_PUBLIC_API_KEY` | `marketshift_dev_secret_key_2026` | Clé d'auth (doit matcher `API_SECRET_KEY` du backend) |
+| `NEXT_PUBLIC_API_KEY` | `<votre-cle-api>` | Clé d'auth (doit matcher `API_SECRET_KEY` du backend) |
 
 > ⚠️ `NEXT_PUBLIC_*` sont embarquées dans le bundle client. Pour une clé sensible utilisez
 > une vraie clé d'API dont la fuite dans le navigateur est acceptable (ou ajoutez un proxy
