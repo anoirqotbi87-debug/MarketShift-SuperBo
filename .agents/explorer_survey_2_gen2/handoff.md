@@ -17,7 +17,7 @@
         ENVIRONMENT: str = Field("development")
         ACTIVE_BROKER: str = Field("xm")
         SIMULATION_MODE: bool = Field(True)
-        API_SECRET_KEY: str = Field("marketshift_dev_secret_key_2026")
+        API_SECRET_KEY: str = Field("")
         ...
         model_config = SettingsConfigDict(
             env_file=".env",

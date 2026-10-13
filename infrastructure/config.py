@@ -7,7 +7,7 @@ class AppConfig(BaseSettings):
     ENVIRONMENT: str = Field("development")
     ACTIVE_BROKER: str = Field("xm")
     SIMULATION_MODE: bool = Field(True)
-    API_SECRET_KEY: str = Field("marketshift_dev_secret_key_2026")
+    API_SECRET_KEY: str = Field("")
 
     # ── Multi-Symbole ─────────────────────────────────────────────────────────
     TRADING_SYMBOLS_RAW: str = Field(
@@ -113,6 +113,15 @@ class AppConfig(BaseSettings):
 
 try:
     Config = AppConfig()
+    if Config.ENVIRONMENT.lower() not in ("development", "dev", "test") and not Config.API_SECRET_KEY:
+        import sys
+        if "pytest" not in sys.modules and not os.getenv("PYTEST_CURRENT_TEST"):
+            logging.critical("CRITICAL SECURITY ERROR: API_SECRET_KEY must be set in production/staging environment.")
+            # Refuser en production réelle hors exécution de tests
+            if not Config.SIMULATION_MODE:
+                raise ValueError("CRITICAL SECURITY ERROR: API_SECRET_KEY must be set in production/staging environment.")
+            else:
+                logging.warning("[Config] Mode SIMULATION actif : API_SECRET_KEY manquante en environnement non-dev.")
 except Exception as e:
     logging.critical(f"Erreur fatale de configuration (.env invalide) : {e}")
     raise

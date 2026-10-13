@@ -39,7 +39,7 @@ import type {
 
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
 const ENV_WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "marketshift_dev_secret_key_2026";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 const STORAGE_KEY = "marketshift.connection";
 

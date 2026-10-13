@@ -148,9 +148,21 @@ def init_api(engine: Engine):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None):
     # Sécurisation du WebSocket par clé d'API passée en query param
-    # Autorise la clé configurée ou la clé de dev par défaut en local
-    valid_keys = {Config.API_SECRET_KEY, "marketshift_dev_secret_key_2026"}
-    if api_key not in valid_keys:
+    client_host = websocket.client.host if websocket.client else ""
+    is_localhost = client_host in ("127.0.0.1", "localhost", "testclient")
+    is_dev = Config.ENVIRONMENT.lower() in ("development", "dev", "test")
+
+    # Clé autorisée : Config.API_SECRET_KEY si définie
+    valid_key = Config.API_SECRET_KEY
+    if not valid_key:
+        if is_dev and is_localhost:
+            # En environnement dev local sans clé configurée, autoriser l'accès avec avertissement
+            logging.warning("[WebSocket] ⚠️ Clé API non configurée en mode développement local : connexion autorisée.")
+        else:
+            logging.error("[WebSocket] ⛔ Clé API non configurée : accès refusé.")
+            await websocket.close(code=1008, reason="API Key not configured")
+            return
+    elif api_key != valid_key:
         await websocket.close(code=1008, reason="Invalid API Key")
         return
         
@@ -331,7 +343,15 @@ async def startup_event():
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(api_key_header: str = Security(api_key_header)):
-    if api_key_header == Config.API_SECRET_KEY:
+    if not Config.API_SECRET_KEY:
+        if Config.ENVIRONMENT.lower() in ("development", "dev", "test"):
+            # En mode développement local sans clé configurée, avertir mais permettre les tests
+            logging.warning("[Auth] ⚠️ Aucune clé API configurée dans l'environnement local.")
+            return api_key_header or ""
+        raise HTTPException(
+            status_code=500, detail="Configuration serveur invalide : API_SECRET_KEY non configurée"
+        )
+    if api_key_header and api_key_header == Config.API_SECRET_KEY:
         return api_key_header
     raise HTTPException(
         status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
