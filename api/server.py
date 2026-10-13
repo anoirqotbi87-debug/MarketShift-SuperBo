@@ -21,7 +21,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from infrastructure.config import Config
 from application.engine import Engine
@@ -29,6 +29,7 @@ from core.interfaces import OrderType
 from infrastructure.database import SessionLocal, get_db
 from infrastructure.credential_vault import encrypt_secret, decrypt_secret
 from infrastructure import models  # noqa: F401  — enregistre les tables SQLAlchemy (create_all)
+from utils.env_writer import atomic_update_env
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger en mémoire — stocke les 200 derniers logs
@@ -981,9 +982,19 @@ class SettingsPayload(BaseModel):
     ml_confidence_threshold: Optional[float] = None
 
 class ApplySettingsPayload(BaseModel):
-    slMult: float
-    confThreshold: float
+    slMult: float = Field(..., ge=0.5, le=5.0, description="Multiplicateur SL ATR borné entre 0.5 et 5.0")
+    confThreshold: float = Field(..., description="Seuil de confiance borné entre 0.50 et 0.90 (ou 50 et 90)")
     symbol: Optional[str] = None
+
+    @field_validator('confThreshold')
+    @classmethod
+    def validate_confidence_threshold(cls, v: float) -> float:
+        normalized = v / 100.0 if v > 1.0 else v
+        if not (0.50 <= normalized <= 0.90):
+            raise ValueError(
+                f"Le seuil de confiance ML doit être compris entre 0.50 et 0.90 (ou 50% et 90%), reçu: {v}"
+            )
+        return v
 
 @app.post("/apply-optimal-settings")
 def apply_optimal_settings(
@@ -991,40 +1002,35 @@ def apply_optimal_settings(
     api_key: str = Depends(verify_api_key)
 ):
     import os
-    env_path = ".env"
-    lines = []
-    
-    if os.path.exists(env_path):
-        with open(env_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            
-    new_lines = []
-    
+
     conf_val = payload.confThreshold / 100.0 if payload.confThreshold > 1 else payload.confThreshold
+
+    # Double validation défensive des bornes
+    if not (0.5 <= payload.slMult <= 5.0):
+        raise HTTPException(
+            status_code=422,
+            detail=f"slMult doit être compris entre 0.5 et 5.0, reçu : {payload.slMult}"
+        )
+    if not (0.50 <= conf_val <= 0.90):
+        raise HTTPException(
+            status_code=422,
+            detail=f"confThreshold doit être compris entre 0.50 et 0.90, reçu : {conf_val}"
+        )
     
     sl_key = f"ATR_SL_MULTIPLIER_{payload.symbol}" if payload.symbol else "ATR_SL_MULTIPLIER"
     conf_key = f"ML_CONFIDENCE_THRESHOLD_{payload.symbol}" if payload.symbol else "ML_CONFIDENCE_THRESHOLD"
-    
-    found_sl = False
-    found_conf = False
-    
-    for line in lines:
-        if line.startswith(f"{sl_key}="):
-            new_lines.append(f"{sl_key}={payload.slMult}\n")
-            found_sl = True
-        elif line.startswith(f"{conf_key}="):
-            new_lines.append(f"{conf_key}={conf_val}\n")
-            found_conf = True
-        else:
-            new_lines.append(line)
-            
-    if not found_sl:
-        new_lines.append(f"{sl_key}={payload.slMult}\n")
-    if not found_conf:
-        new_lines.append(f"{conf_key}={conf_val}\n")
-        
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
+
+    # Mise à jour atomique et thread-safe du fichier .env
+    try:
+        atomic_update_env({
+            sl_key: str(payload.slMult),
+            conf_key: str(conf_val)
+        }, env_path=".env")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Échec de l'écriture atomique dans .env : {e}"
+        )
         
     # Reload OS env vars for runtime
     os.environ[sl_key] = str(payload.slMult)
