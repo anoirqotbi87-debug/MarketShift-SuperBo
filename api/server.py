@@ -21,7 +21,7 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from infrastructure.config import Config
 from application.engine import Engine
@@ -776,6 +776,17 @@ class TradeRequest(BaseModel):
     symbol: str
     direction: str
     volume: float = 0.01
+    sl_price: Optional[float] = None
+    tp_price: Optional[float] = None
+    sl_pips: Optional[float] = None
+    tp_pips: Optional[float] = None
+
+    @field_validator("volume")
+    @classmethod
+    def validate_volume(cls, v):
+        if v <= 0:
+            raise ValueError("Le volume d'ordre doit être strictement positif (> 0).")
+        return v
 
 
 @app.post("/trade")
@@ -786,11 +797,108 @@ def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
     if _engine.kill_switch.is_triggered:
         raise HTTPException(status_code=403, detail="KILL SWITCH IS ACTIVE")
 
-    order_type = OrderType.BUY if req.direction.upper() == "BUY" else OrderType.SELL
-    result = _engine.connector.execute_order(req.symbol, order_type, req.volume)
+    dir_upper = req.direction.upper()
+    if dir_upper not in ("BUY", "SELL"):
+        raise HTTPException(status_code=422, detail="Direction invalide (attendu: BUY ou SELL)")
+
+    order_type = OrderType.BUY if dir_upper == "BUY" else OrderType.SELL
+
+    # 1. Validation obligatoire du Stop Loss (refuser les ordres nus sans SL)
+    effective_sl = req.sl_price
+    effective_tp = req.tp_price
+
+    if (effective_sl is not None and effective_sl <= 0) or (effective_tp is not None and effective_tp <= 0):
+        raise HTTPException(status_code=422, detail="Les prix de SL et TP doivent être strictement positifs (> 0).")
+
+    # Si sl_price n'est pas fourni directement mais sl_pips est spécifié, calculer le prix absolu
+    if effective_sl is None:
+        if req.sl_pips is not None and req.sl_pips > 0:
+            pip_size = _engine._get_pip_size(req.symbol)
+            df = _engine.connector.get_historical_data(req.symbol, _engine._tf_m1, 2)
+            calculated_sl, calculated_tp = _engine._compute_sl_tp_prices(
+                symbol=req.symbol,
+                direction=order_type,
+                sl_pips=req.sl_pips,
+                tp_pips=req.tp_pips or 0.0,
+                pip_size=pip_size,
+                df=df
+            )
+            effective_sl = calculated_sl
+            if effective_tp is None and req.tp_pips is not None and req.tp_pips > 0:
+                effective_tp = calculated_tp
+        else:
+            raise HTTPException(
+                status_code=422,
+                detail="Sécurité Trading : Le Stop Loss est obligatoire (fournir 'sl_price' ou 'sl_pips' > 0)."
+            )
+
+    if effective_sl is None or effective_sl <= 0:
+        raise HTTPException(status_code=422, detail="Sécurité Trading : Stop Loss nul ou invalide interdit.")
+
+    # 2. Validation par le PreTradeValidator (Sanity checks, marge, rate-limit, spread)
+    if hasattr(_engine, "pretrade_validator") and _engine.pretrade_validator:
+        try:
+            account = _engine.state_manager.account
+            positions = _engine.state_manager.positions
+            sym_info = _engine.connector.get_symbol_info(req.symbol)
+            spread_pips = float(getattr(sym_info, "spread", 1.0)) * _engine._get_pip_size(req.symbol) / max(1e-5, _engine._get_pip_size(req.symbol))
+            
+            synthetic_signal = Signal(
+                symbol=req.symbol,
+                direction=order_type,
+                confidence=1.0,
+                source="Manual_API",
+                sl_pips=req.sl_pips or 20.0,
+                tp_pips=req.tp_pips or 35.0
+            )
+
+            is_valid = _engine.pretrade_validator.validate_signal(
+                signal=synthetic_signal,
+                account=account,
+                current_spread_pips=spread_pips,
+                open_positions=positions
+            )
+            if not is_valid:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ordre rejeté par le PreTradeValidator (contrôles de risque, marge ou spread non satisfaits)."
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error(f"[API] Erreur PreTradeValidator lors de l'ordre manuel : {e}")
+
+    # 3. Exécution avec Stop Loss garanti côté broker
+    tp_to_send = effective_tp if (effective_tp is not None and effective_tp > 0) else 0.0
+    result = _engine.connector.execute_order(
+        req.symbol,
+        order_type,
+        req.volume,
+        sl=float(effective_sl),
+        tp=float(tp_to_send)
+    )
 
     if not result:
         raise HTTPException(status_code=500, detail="Échec de l'ordre")
+
+    # 4. Journalisation dans l'AuditTrail (MiFID II)
+    try:
+        from utils.audit_trail import AuditTrail
+        if not hasattr(_engine, 'audit_trail'):
+            _engine.audit_trail = AuditTrail()
+        _engine.audit_trail.log_order({
+            'ticket': result.get('ticket', 0),
+            'symbol': req.symbol,
+            'direction': dir_upper,
+            'volume': req.volume,
+            'price': result.get('price', 0.0),
+            'sl': float(effective_sl),
+            'tp': float(tp_to_send),
+            'ml_confidence': 1.0,
+            'source': 'MANUAL_REST'
+        })
+    except Exception as e:
+        logging.error(f"[API] Erreur AuditTrail pour ordre manuel : {e}")
 
     return result
 
