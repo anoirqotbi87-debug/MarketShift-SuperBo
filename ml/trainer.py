@@ -69,16 +69,34 @@ try:
     import pandas as pd
     from xgboost import XGBClassifier
     from sklearn.preprocessing import StandardScaler
-    from sklearn.model_selection import train_test_split, GridSearchCV
-    from sklearn.metrics import accuracy_score
+    from sklearn.model_selection import train_test_split, GridSearchCV, TimeSeriesSplit
+    from sklearn.metrics import accuracy_score, confusion_matrix
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    logging.warning("[MLTrainer] XGBoost ou scikit-learn non disponible. ML désactivé.")
+
+try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
     from ml.lstm_model import LSTMPredictor, create_sequences
-    ML_AVAILABLE = True
+    TORCH_AVAILABLE = True
 except ImportError:
-    ML_AVAILABLE = False
-    logging.warning("[MLTrainer] XGBoost, scikit-learn ou PyTorch non disponible. ML désactivé.")
+    torch = None
+    nn = None
+    optim = None
+    LSTMPredictor = None
+    create_sequences = None
+    TORCH_AVAILABLE = False
+    logging.info("[MLTrainer] PyTorch non disponible. Entraînement et prédictions en mode XGBoost.")
+
+from infrastructure.config import Config
+try:
+    from infrastructure.telegram_notifier import telegram_notifier
+except ImportError:
+    telegram_notifier = None
+
 
 
 class MLTrainer:
@@ -117,14 +135,18 @@ class MLTrainer:
             scaler_path = os.path.join(MODEL_DIR, "scaler.pkl")
             lstm_path = os.path.join(MODEL_DIR, "lstm_model.pt")
             
-            if os.path.exists(xgb_path) and os.path.exists(scaler_path) and os.path.exists(lstm_path):
+            if os.path.exists(xgb_path) and os.path.exists(scaler_path):
                 self._xgb_model = joblib.load(xgb_path)
                 self._scaler = joblib.load(scaler_path)
                 
-                # Load PyTorch LSTM
-                self._lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
-                self._lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
-                self._lstm_model.eval()
+                # Load PyTorch LSTM si disponible
+                if TORCH_AVAILABLE and torch is not None and os.path.exists(lstm_path) and LSTMPredictor is not None:
+                    try:
+                        self._lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
+                        self._lstm_model.load_state_dict(torch.load(lstm_path, weights_only=True))
+                        self._lstm_model.eval()
+                    except Exception as lstm_err:
+                        logging.warning(f"[MLTrainer] Impossible de charger lstm_model.pt: {lstm_err}")
                 
                 self._is_trained = True
                 self._last_trained = "Loaded from disk"
@@ -336,11 +358,21 @@ class MLTrainer:
         try:
             processed = self._build_features(df)
 
-            if len(processed) < self.MIN_SAMPLES_TO_TRAIN:
+            min_samples = getattr(Config, 'ML_MIN_SAMPLES', 10000)
+            if len(processed) < min_samples:
                 logging.warning(
-                    f"[MLTrainer] Pas assez de samples après feature engineering "
-                    f"({len(processed)} < {self.MIN_SAMPLES_TO_TRAIN})"
+                    f"[MLTrainer] ❌ Ré-entraînement rejeté : volume d'échantillons insuffisant "
+                    f"({len(processed)} < {min_samples}). Modèle en production conservé intact."
                 )
+                if telegram_notifier:
+                    try:
+                        telegram_notifier.notify_critical_event(
+                            "ML_RETRAIN_REJECTED",
+                            reason=f"Volume insuffisant : {len(processed)} < {min_samples} barres",
+                            details="La porte de qualité a rejeté le modèle. Le modèle précédent reste actif."
+                        )
+                    except Exception as notif_err:
+                        logging.error(f"[MLTrainer] Erreur notification Telegram: {notif_err}")
                 return False
 
             X = processed[self.FEATURE_COLUMNS].values
@@ -381,34 +413,63 @@ class MLTrainer:
             best_xgb = grid_search.best_estimator_
             logging.info(f"[MLTrainer] Meilleurs paramètres XGBoost: {grid_search.best_params_}")
 
-            # 2. Entraînement LSTM (PyTorch)
-            logging.info("[MLTrainer] Début de l'entraînement LSTM...")
-            seq_length = 10
-            X_seq, y_seq = create_sequences(X_train_s, y_train, seq_length)
-            
-            # Convert to PyTorch tensors
-            X_tensor = torch.tensor(X_seq, dtype=torch.float32)
-            y_tensor = torch.tensor(y_seq, dtype=torch.float32).unsqueeze(1)
-            
-            lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
-            criterion = nn.BCELoss()
-            optimizer = optim.Adam(lstm_model.parameters(), lr=0.001)
-            
-            epochs = 10
-            lstm_model.train()
-            for epoch in range(epochs):
-                optimizer.zero_grad()
-                outputs = lstm_model(X_tensor)
-                loss = criterion(outputs, y_tensor)
-                loss.backward()
-                optimizer.step()
-            
-            lstm_model.eval()
-            logging.info("[MLTrainer] Entraînement LSTM terminé.")
+            # 2. Entraînement LSTM (PyTorch si disponible)
+            lstm_model = None
+            if TORCH_AVAILABLE and torch is not None and LSTMPredictor is not None and create_sequences is not None:
+                try:
+                    logging.info("[MLTrainer] Début de l'entraînement LSTM...")
+                    seq_length = 10
+                    X_seq, y_seq = create_sequences(X_train_s, y_train, seq_length)
+                    
+                    # Convert to PyTorch tensors
+                    X_tensor = torch.tensor(X_seq, dtype=torch.float32)
+                    y_tensor = torch.tensor(y_seq, dtype=torch.float32).unsqueeze(1)
+                    
+                    lstm_model = LSTMPredictor(input_size=len(self.FEATURE_COLUMNS), hidden_size=64, num_layers=2)
+                    criterion = nn.BCELoss()
+                    optimizer = optim.Adam(lstm_model.parameters(), lr=0.001)
+                    
+                    epochs = 10
+                    lstm_model.train()
+                    for epoch in range(epochs):
+                        optimizer.zero_grad()
+                        outputs = lstm_model(X_tensor)
+                        loss = criterion(outputs, y_tensor)
+                        loss.backward()
+                        optimizer.step()
+                    
+                    lstm_model.eval()
+                    logging.info("[MLTrainer] Entraînement LSTM terminé.")
+                except Exception as lstm_err:
+                    logging.warning(f"[MLTrainer] Échec entraînement LSTM (fallback XGBoost seul): {lstm_err}")
+                    lstm_model = None
+            else:
+                logging.info("[MLTrainer] PyTorch non disponible : Entraînement en mode XGBoost pur.")
 
-            # Évaluation XGBoost seulement pour simplifier l'accuracy globale
+            # Évaluation XGBoost sur test set
             preds = best_xgb.predict(X_test_s)
-            accuracy = accuracy_score(y_test, preds)
+            accuracy = float(accuracy_score(y_test, preds))
+            min_accuracy = float(getattr(Config, 'ML_MIN_ACCURACY', 0.55))
+
+            # Quality Gate : vérification de l'accuracy minimale
+            if accuracy < min_accuracy:
+                logging.warning(
+                    f"[MLTrainer] ❌ Ré-entraînement rejeté : test accuracy trop faible "
+                    f"({accuracy:.1%} < {min_accuracy:.1%}). Modèle en production conservé intact."
+                )
+                if telegram_notifier:
+                    try:
+                        telegram_notifier.notify_critical_event(
+                            "ML_RETRAIN_REJECTED",
+                            reason=f"Accuracy insuffisante : {accuracy:.1%} < {min_accuracy:.1%}",
+                            details="La porte de qualité a rejeté le modèle. Le modèle précédent reste actif."
+                        )
+                    except Exception as notif_err:
+                        logging.error(f"[MLTrainer] Erreur notification Telegram: {notif_err}")
+                return False
+
+            cm = confusion_matrix(y_test, preds).tolist()
+            now_str = time.strftime("%Y-%m-%d %H:%M:%S")
 
             with self._lock:
                 self._xgb_model  = best_xgb
@@ -417,29 +478,43 @@ class MLTrainer:
                 self._is_trained = True
                 self._accuracy   = accuracy
                 self._sample_count = len(processed)
-                self._last_trained = time.strftime("%Y-%m-%d %H:%M:%S")
+                self._last_trained = now_str
 
             # Persistance sur disque
             try:
                 joblib.dump(best_xgb, os.path.join(MODEL_DIR, "xgb_model.pkl"))
                 joblib.dump(scaler, os.path.join(MODEL_DIR, "scaler.pkl"))
-                torch.save(lstm_model.state_dict(), os.path.join(MODEL_DIR, "lstm_model.pt"))
+                if TORCH_AVAILABLE and torch is not None and lstm_model is not None:
+                    torch.save(lstm_model.state_dict(), os.path.join(MODEL_DIR, "lstm_model.pt"))
                 
                 import json
                 meta = {
                     "accuracy": float(accuracy),
                     "sample_count": int(len(processed)),
-                    "last_trained": self._last_trained
+                    "last_trained": self._last_trained,
+                    "confusion_matrix": cm,
+                    "min_accuracy_threshold": float(min_accuracy),
+                    "symbols": getattr(self, '_symbols', [])
                 }
                 with open(os.path.join(MODEL_DIR, "model_meta.json"), 'w') as f:
-                    json.dump(meta, f)
+                    json.dump(meta, f, indent=2)
                     
                 logging.info("[MLTrainer] 💾 Modèles sauvegardés sur disque de manière permanente.")
             except Exception as save_err:
                 logging.error(f"[MLTrainer] Échec de la sauvegarde sur disque : {save_err}")
 
+            if telegram_notifier:
+                try:
+                    telegram_notifier.notify_critical_event(
+                        "ML_RETRAIN_SUCCESS",
+                        reason=f"Nouveau modèle ML validé avec {accuracy:.1%} d'accuracy (seuil {min_accuracy:.1%})",
+                        details=f"Échantillons : {len(processed)} barres. Modèles sauvegardés sur disque."
+                    )
+                except Exception as notif_err:
+                    logging.error(f"[MLTrainer] Erreur notification Telegram: {notif_err}")
+
             logging.info(
-                f"[MLTrainer] [OK] Modèle Ensemble (XGB+LSTM) entraîné — Samples: {len(processed)} | "
+                f"[MLTrainer] ✅ Modèle Ensemble (XGB+LSTM) entraîné et validé — Samples: {len(processed)} | "
                 f"XGB Accuracy: {accuracy:.1%} | Dernière MAJ: {self._last_trained}"
             )
             return True

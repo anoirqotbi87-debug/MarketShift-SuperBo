@@ -32,6 +32,8 @@ class AppConfig(BaseSettings):
     # Seuil calibré à 58% (cohérent avec l'accuracy modèle ~62.7%).
     # Overridable par symbole via ML_CONFIDENCE_THRESHOLD_EURUSD=0.55 dans .env
     ML_CONFIDENCE_THRESHOLD: float = Field(0.58, ge=0.0, le=1.0)
+    ML_MIN_ACCURACY: float = Field(0.55, ge=0.0, le=1.0, description="Accuracy minimale requise pour valider un ré-entraînement ML")
+    ML_MIN_SAMPLES: int = Field(10000, ge=100, description="Nombre minimal de barres requises pour valider un ré-entraînement ML")
 
     # ── Credentials ───────────────────────────────────────────────────────────
     XM_LOGIN: str = Field("")
