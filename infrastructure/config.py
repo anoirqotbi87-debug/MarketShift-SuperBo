@@ -21,6 +21,8 @@ class AppConfig(BaseSettings):
     MAX_RISK_PER_TRADE_PCT: float = Field(0.01, ge=0.0, le=1.0)
     EMERGENCY_CLOSE_ENABLED: bool = Field(True)
     CIRCUIT_BREAKER_MAX_VIOLATIONS: int = Field(5, ge=1)
+    CIRCUIT_BREAKER_TRAILING_DD_ENABLED: bool = Field(True, description="Active le calcul du trailing drawdown depuis le pic d'équité de la journée")
+    CIRCUIT_BREAKER_PROFIT_LOCK_PCT: float = Field(0.0, ge=0.0, description="Verrouillage du profit journalier (ex: 0.015)")
 
     # ── ATR SL/TP Multipliers ────────────────────────────────────────────────
     ATR_SL_MULTIPLIER: float = Field(1.5, ge=0.1)
