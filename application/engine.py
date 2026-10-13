@@ -153,6 +153,10 @@ class Engine:
         self._broker_disconnected_latched: bool = False
         
         # Anti-spam des signaux (un seul signal par bougie par symbole)
+        # File de reconciliation des ordres fantomes (suite a timeout MT5)
+        self._pending_reconciliation: list = []
+        self._known_position_tickets: set = set()
+
         self._last_signal_candle: Dict[str, datetime.datetime] = {}
 
         logging.info(
@@ -238,6 +242,10 @@ class Engine:
         # Démarrer le news filter maintenant que l'event loop est active
         self.news_filter.start()
         
+        # Initialiser les tickets connus au démarrage
+        for p in self.state_manager.positions:
+            self._known_position_tickets.add(p.ticket)
+
         while self.running:
             if self.kill_switch.is_triggered:
                 await asyncio.sleep(1)
@@ -252,6 +260,12 @@ class Engine:
                 logging.warning("[Engine] ⏱️ Timeout (4s) sur update_state — état du compte inchangé ce cycle.")
             except Exception as e:
                 logging.error(f"[Engine] Erreur update_state: {e}")
+
+            # Réconciliation des ordres orphelins / fantômes (suite à un timeout MT5)
+            try:
+                await self._reconcile_orphan_orders()
+            except Exception as e:
+                logging.error(f"[Engine] Erreur réconciliation ordres orphelins: {e}")
 
             # Surveillance de connectivité Broker / Compte avec latch anti-spam
             is_connected = bool(getattr(self.connector, "connected", False) and (self.state_manager.account is not None))
@@ -947,14 +961,20 @@ class Engine:
                         timeout=4.0
                     )
                 except asyncio.TimeoutError:
+                    import time as _t
                     logging.warning(
                         f"[Engine] ⏱️ Timeout (4s) sur exécution ordre {payload['symbol']} — "
-                        "ordre abandonné, prochain ordre traité."
+                        "mise en attente dans la file de réconciliation des ordres orphelins."
                     )
+                    payload['timeout_at'] = _t.time()
+                    payload['retries'] = 0
+                    self._pending_reconciliation.append(payload)
                     self.order_queue.task_done()
                     continue
 
                 if result:
+                    if 'ticket' in result:
+                        self._known_position_tickets.add(result['ticket'])
                     logging.info(
                         f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
                         f"Prix: {result['price']} | Volume: {result['volume']}"
@@ -1004,3 +1024,77 @@ class Engine:
                 break
             except Exception as e:
                 logging.error(f"[Engine] Erreur Order Routing Worker: {e}")
+
+    async def _reconcile_orphan_orders(self):
+        """
+        Réconcilie les ordres placés ayant subi un timeout réseau (ordres potentiellement fantômes).
+        Vérifie si une position correspondante est apparue chez le broker.
+        """
+        if not self._pending_reconciliation:
+            return
+
+        current_positions = self.state_manager.positions
+        remaining = []
+
+        for payload in self._pending_reconciliation:
+            symbol = payload.get('symbol')
+            volume = payload.get('volume', 0.0)
+            
+            # Recherche d'une position correspondante non encore connue
+            matched_pos = None
+            for pos in current_positions:
+                if (pos.symbol == symbol and 
+                    abs(pos.volume - volume) < 1e-4 and 
+                    pos.ticket not in self._known_position_tickets):
+                    matched_pos = pos
+                    break
+
+            if matched_pos:
+                self._known_position_tickets.add(matched_pos.ticket)
+                logging.critical(
+                    f"[Engine] 👻 Ordre orphelin réconcilié et adopté ! "
+                    f"Ticket: {matched_pos.ticket} | Symbole: {matched_pos.symbol} | Volume: {matched_pos.volume}"
+                )
+                
+                # Trace d'Audit MiFID II
+                try:
+                    from utils.audit_trail import AuditTrail
+                    if not hasattr(self, 'audit_trail'):
+                        self.audit_trail = AuditTrail()
+                    self.audit_trail.log_order({
+                        'ticket': matched_pos.ticket,
+                        'symbol': matched_pos.symbol,
+                        'direction': getattr(matched_pos.type, 'name', str(matched_pos.type)),
+                        'volume': matched_pos.volume,
+                        'price': matched_pos.open_price,
+                        'sl': matched_pos.sl,
+                        'tp': matched_pos.tp,
+                        'reconciled': True
+                    })
+                except Exception as e:
+                    logging.error(f"[Engine] Erreur AuditTrail lors de réconciliation : {e}")
+
+                # Notification Telegram
+                if self.notifier:
+                    try:
+                        self.notifier.notify_critical_event(
+                            "ORPHAN_ORDER_ADOPTED",
+                            reason=f"Ghost order for {symbol} adopted after timeout",
+                            details=f"Ticket: {matched_pos.ticket}, Volume: {matched_pos.volume}, Price: {matched_pos.open_price}"
+                        )
+                    except Exception as notif_err:
+                        logging.error(f"[Engine] Erreur notification ORPHAN_ORDER_ADOPTED: {notif_err}")
+            else:
+                payload['retries'] = payload.get('retries', 0) + 1
+                import time as _t
+                elapsed = _t.time() - payload.get('timeout_at', _t.time())
+                if payload['retries'] >= 3 or elapsed > 15.0:
+                    logging.warning(
+                        f"[Engine] Ordre orphelin définitivement abandonné sur {symbol} "
+                        f"(non trouvé chez le broker après {payload['retries']} cycles)."
+                    )
+                else:
+                    remaining.append(payload)
+
+        self._pending_reconciliation = remaining
+
