@@ -40,8 +40,8 @@ Si vous souhaitez développer ou faire tourner le bot directement sur votre mach
 1. **Prérequis :** Avoir [Docker](https://www.docker.com/) et `docker-compose` installés sur votre serveur.
 2. **Cloner le projet :**
    ```bash
-   git clone https://github.com/anoirqotbi87-debug/MarketShift-SuperBot.git
-   cd MarketShift-SuperBot
+   git clone https://github.com/anoirqotbi87-debug/MarketShift-SuperBo.git
+   cd MarketShift-SuperBo
    ```
 3. **Lancer le conteneur en arrière-plan :**
    ```bash

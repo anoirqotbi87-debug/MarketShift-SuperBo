@@ -22,7 +22,6 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-import uvicorn
 
 from fastapi import FastAPI
 from infrastructure.config import Config
