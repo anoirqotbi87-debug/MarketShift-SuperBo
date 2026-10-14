@@ -990,9 +990,7 @@ class Engine:
                         f"[Engine] ✅ Ordre exécuté ! Ticket: {result['ticket']} | "
                         f"Prix: {result['price']} | Volume: {result['volume']} | Latence: {_latency_ms:.1f}ms"
                     )
-                else:
-                    execution_metrics.record_order_execution(_latency_ms, success=False)
-                    
+
                     # Trace d'Audit MiFID II
                     try:
                         from utils.audit_trail import AuditTrail
@@ -1030,6 +1028,8 @@ class Engine:
                             )
                         except Exception as alert_err:
                             logging.error(f"[Engine] Erreur dispatch trade opened: {alert_err}")
+                else:
+                    execution_metrics.record_order_execution(_latency_ms, success=False)
                         
                 self.order_queue.task_done()
                 
