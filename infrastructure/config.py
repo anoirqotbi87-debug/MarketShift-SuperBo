@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AppConfig(BaseSettings):
     ENVIRONMENT: str = Field("development")
     ACTIVE_BROKER: str = Field("xm")
+    BROKER_MODE: str = Field("local_mt5")
     SIMULATION_MODE: bool = Field(True)
     API_SECRET_KEY: str = Field("")
 
@@ -48,11 +49,51 @@ class AppConfig(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="", description="Telegram Bot API Token")
     TELEGRAM_CHAT_ID: str = Field(default="", description="Telegram Chat ID for alerts")
 
+    # ── MetaApi Cloud Settings (B-01) ────────────────────────────────────────
+    METAAPI_TOKEN: str = Field(default="", description="MetaApi Cloud Access Token")
+    METAAPI_ACCOUNT_ID: str = Field(default="", description="MetaApi MT5 Account ID")
+    METAAPI_REGION: str = Field(default="vint-hill", description="MetaApi Provisioning Region")
+
+    # ── Cloud vs Local Timeouts (B-02) ───────────────────────────────────────
+    ORDER_EXECUTION_TIMEOUT_LOCAL: float = Field(default=4.0, ge=1.0)
+    ORDER_EXECUTION_TIMEOUT_CLOUD: float = Field(default=12.0, ge=1.0)
+    DATA_FETCH_TIMEOUT_LOCAL: float = Field(default=5.0, ge=1.0)
+    DATA_FETCH_TIMEOUT_CLOUD: float = Field(default=15.0, ge=1.0)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore"
     )
+
+    @field_validator('BROKER_MODE', mode='after')
+    @classmethod
+    def validate_broker_mode(cls, v: str) -> str:
+        mode = (v or "").strip().lower()
+        if mode not in ("metaapi", "local_mt5", "hybrid"):
+            logging.warning(f"[Config] Mode broker inconnu '{v}'. Revert sur 'local_mt5'.")
+            return "local_mt5"
+        return mode
+
+    @property
+    def order_execution_timeout(self) -> float:
+        """Timeout d'exécution adapté selon le mode broker (B-02)."""
+        if self.BROKER_MODE.lower() in ("metaapi", "hybrid"):
+            return self.ORDER_EXECUTION_TIMEOUT_CLOUD
+        return self.ORDER_EXECUTION_TIMEOUT_LOCAL
+
+    @property
+    def data_fetch_timeout(self) -> float:
+        """Timeout de récupération de données adapté selon le mode broker (B-02)."""
+        if self.BROKER_MODE.lower() in ("metaapi", "hybrid"):
+            return self.DATA_FETCH_TIMEOUT_CLOUD
+        return self.DATA_FETCH_TIMEOUT_LOCAL
+
+    def get_metaapi_credentials(self) -> tuple[str, str]:
+        """Récupère le token et l'accountId de MetaApi (B-01)."""
+        token = (self.METAAPI_TOKEN or "").strip()
+        account_id = (self.METAAPI_ACCOUNT_ID or "").strip()
+        return token, account_id
 
     @property
     def TRADING_SYMBOLS(self) -> List[str]:

@@ -1,7 +1,10 @@
 import logging
 import threading
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
 from core.interfaces import IBrokerConnector, AccountInfo, PositionInfo, OrderType
+
+if TYPE_CHECKING:
+    from infrastructure.config import AppConfig
 
 try:
     from infrastructure.telegram_notifier import TelegramNotifier, telegram_notifier
@@ -160,3 +163,51 @@ class BrokerRouter(IBrokerConnector):
             if self._switch_to_fallback():
                 return self._active_broker.get_history_deals(from_date, to_date)
         return deals
+
+
+# ── Fabrique — B-01 ───────────────────────────────────────────────────────────
+
+def create_connector_from_config(config: "AppConfig") -> IBrokerConnector:
+    """
+    Fabrique le connecteur broker adéquat selon la valeur de BROKER_MODE dans AppConfig.
+
+    BROKER_MODE = "local_mt5"  → MT5Connector (IPC local, plan par défaut)
+    BROKER_MODE = "metaapi"    → MetaApiConnector (Cloud MetaApi)
+    BROKER_MODE = "hybrid"     → BrokerRouter(primary=MetaApiConnector, fallback=MT5Connector)
+
+    Les credentials ne sont jamais hardcodés ; ils sont lus via config.get_metaapi_credentials()
+    et config.get_broker_credentials().
+    """
+    mode = (config.BROKER_MODE or "local_mt5").strip().lower()
+
+    # Import local pour éviter les dépendances circulaires
+    from infrastructure.mt5_connector import MT5Connector
+    from infrastructure.metaapi_connector import MetaApiConnector
+
+    if mode == "metaapi":
+        token, account_id = config.get_metaapi_credentials()
+        connector = MetaApiConnector(
+            token=token,
+            account_id=account_id,
+            region=config.METAAPI_REGION,
+        )
+        logging.info("[BrokerRouter] Mode MetaApi Cloud sélectionné.")
+        return connector
+
+    elif mode == "hybrid":
+        token, account_id = config.get_metaapi_credentials()
+        primary = MetaApiConnector(
+            token=token,
+            account_id=account_id,
+            region=config.METAAPI_REGION,
+        )
+        login, password, server = config.get_broker_credentials()
+        fallback = MT5Connector(login=login, password=password, server=server)
+        logging.info("[BrokerRouter] Mode Hybrid (MetaApi → MT5 fallback) sélectionné.")
+        return BrokerRouter(primary=primary, fallback=fallback)
+
+    else:  # "local_mt5" (par défaut)
+        login, password, server = config.get_broker_credentials()
+        connector = MT5Connector(login=login, password=password, server=server)
+        logging.info("[BrokerRouter] Mode local MT5 sélectionné.")
+        return connector
