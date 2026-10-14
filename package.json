@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Root package.json to proxy commands to the ui folder",
   "scripts": {
-    "dev": "cd ui && npm run dev",
+    "build": "npm --prefix dashboard install && npm --prefix dashboard run build",
+    "dev": "npm --prefix dashboard run dev",
     "install-ui": "cd ui && npm install"
   }
 }

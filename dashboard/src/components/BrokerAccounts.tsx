@@ -75,7 +75,7 @@ function toCard(acc: BrokerAccount): AccountCard {
  * boîte de dialogue de connexion complète : sélection/recherche de n'importe quel serveur
  * (ex: XMGlobal-MT5 9, Exness, etc.), saisie du login et du mot de passe.
  */
-export function getWebTraderUrl(brokerName: string, server: string, login: number): string {
+export function getWebTraderUrl(_brokerName: string, server: string, login: number): string {
   const params = new URLSearchParams();
   if (server) {
     params.set("server", server);
