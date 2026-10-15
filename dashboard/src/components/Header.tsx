@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Activity,
   Ban,
+  BookOpen,
   CircleOff,
   Menu,
   Play,
@@ -25,6 +26,7 @@ interface HeaderProps {
   symbolsCount: number | null;
   onReconnect: () => void;
   onOpenMenu?: () => void;
+  onOpenGuide?: () => void;
   title?: string;
 }
 
@@ -35,6 +37,7 @@ export default function Header({
   symbolsCount,
   onReconnect,
   onOpenMenu,
+  onOpenGuide,
   title,
 }: HeaderProps) {
   const [showEmergency, setShowEmergency] = useState(false);
@@ -131,6 +134,16 @@ export default function Header({
       {/* Commandes de sécurité */}
       <div className="flex items-center gap-2">
         <ConnectionSwitcher connected={connected} onReconnect={onReconnect} />
+        {onOpenGuide && (
+          <button
+            onClick={onOpenGuide}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-2 text-xs font-semibold text-zinc-300 transition hover:border-cyan-700 hover:bg-cyan-500/10 hover:text-cyan-300"
+            title="Ouvrir le Mode Opératoire"
+          >
+            <BookOpen className="h-3.5 w-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Guide</span>
+          </button>
+        )}
         {actionMsg && <span className="text-[11px] text-zinc-500">{actionMsg}</span>}
         {isPaused ? (
           <button

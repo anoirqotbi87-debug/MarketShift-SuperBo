@@ -3,6 +3,7 @@
 import {
   Activity,
   BarChart3,
+  BookOpen,
   BrainCircuit,
   GaugeCircle,
   Landmark,
@@ -24,7 +25,8 @@ export type DashboardView =
   | "ml"
   | "mt5"
   | "brokers"
-  | "logs";
+  | "logs"
+  | "guide";
 
 interface SidebarProps {
   view: DashboardView;
@@ -45,6 +47,7 @@ const NAV_ITEMS: Array<{ id: DashboardView; label: string; icon: typeof Activity
   { id: "brokers", label: "Comptes Broker", icon: Landmark },
   { id: "config", label: "Stratégies & Risque", icon: Settings2 },
   { id: "logs", label: "Terminal Logs", icon: SquareTerminal },
+  { id: "guide", label: "Mode Opératoire", icon: BookOpen },
 ];
 
 export default function Sidebar({

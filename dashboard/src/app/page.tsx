@@ -17,6 +17,7 @@ import LogsView from "@/components/LogsView";
 import RiskMetricsPanel from "@/components/RiskMetricsPanel";
 import KellySizer from "@/components/KellySizer";
 import PriceAlerts from "@/components/PriceAlerts";
+import UserGuide from "@/components/UserGuide";
 import Sidebar, { type DashboardView } from "@/components/Sidebar";
 import { fetchEquityCurve, fetchKpiMetrics } from "@/lib/api";
 import { useMarketShiftWS } from "@/hooks/useMarketShiftWS";
@@ -34,6 +35,7 @@ const VIEW_TITLES: Record<DashboardView, string> = {
   brokers: "COMPTES BROKER",
   config: "CONFIG & RISQUE",
   logs: "TERMINAL LOGS",
+  guide: "MODE OPÉRATOIRE & GUIDE UTILISATEUR",
 };
 
 export default function DashboardPage() {
@@ -101,6 +103,7 @@ export default function DashboardPage() {
           symbolsCount={snapshot.signals ? Object.keys(snapshot.signals).length : null}
           onReconnect={reconnect}
           onOpenMenu={() => setMobileMenuOpen(true)}
+          onOpenGuide={() => setView("guide")}
           title={VIEW_TITLES[view]}
         />
 
@@ -176,6 +179,7 @@ export default function DashboardPage() {
             )}
 
             {view === "logs" && <LogsView logs={snapshot.logs ?? []} />}
+            {view === "guide" && <UserGuide onNavigate={setView} />}
           </div>
         </main>
       </div>
