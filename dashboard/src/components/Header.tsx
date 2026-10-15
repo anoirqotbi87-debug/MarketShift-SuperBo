@@ -25,7 +25,7 @@ interface HeaderProps {
   snapshot: WsSnapshot;
   connected: boolean;
   latencyMs: number | null;
-  symbolsCount: number | null;
+  symbolsCount?: number | null;
   onReconnect: () => void;
   onOpenMenu?: () => void;
   onOpenGuide?: () => void;
@@ -36,7 +36,6 @@ export default function Header({
   snapshot,
   connected,
   latencyMs,
-  symbolsCount,
   onReconnect,
   onOpenMenu,
   onOpenGuide,
