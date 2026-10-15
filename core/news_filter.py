@@ -81,12 +81,18 @@ class NewsFilter:
     def get_currencies_for_symbol(self, symbol: str) -> List[str]:
         """Extrait les devises associées à un symbole de trading."""
         currencies = []
+        sym_clean = symbol.upper().replace("#", "").replace(".", "").replace("MICRO", "").replace("CASH", "")
         for curr in ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "NZD", "CHF"]:
-            if curr in symbol:
+            if curr in sym_clean:
                 currencies.append(curr)
-        if symbol in ["BTCUSD", "ETHUSD", "XAUUSD", "GOLD"]:
+        # Actifs cotés en USD (Cryptos, Or, Argent, Pétrole, Indices US)
+        if any(c in sym_clean for c in ["BTC", "ETH", "SOL", "XAU", "GOLD", "SILVER", "XAG", "OIL", "WTI", "US30", "US100", "US500", "SPX", "NAS", "DJ30"]):
             if "USD" not in currencies:
                 currencies.append("USD")
+        # Actifs cotés en EUR (Indices Européens)
+        if any(c in sym_clean for c in ["GER40", "DAX", "DE40"]):
+            if "EUR" not in currencies:
+                currencies.append("EUR")
         return currencies
 
     def get_affected_symbols_for_currency(self, currency: str, all_symbols: List[str]) -> List[str]:
@@ -99,7 +105,11 @@ class NewsFilter:
         avec statut d'embargo précis pour chaque événement.
         """
         now = datetime.now(timezone.utc)
-        symbols = all_symbols or ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        symbols = all_symbols or [
+            "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+            "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+            "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+        ]
         results = []
 
         for item in self.news_events:
@@ -148,7 +158,11 @@ class NewsFilter:
         Retourne un résumé de l'état global de l'embargo macro pour le dashboard.
         """
         now = datetime.now(timezone.utc)
-        symbols = all_symbols or ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        symbols = all_symbols or [
+            "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+            "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+            "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+        ]
         events = self.get_detailed_events(symbols)
 
         active_events = [e for e in events if e["isInEmbargo"]]

@@ -89,7 +89,13 @@ class RuntimeSettings:
     mtf_enabled: bool            = getattr(Config, "MTF_ENABLED", True)
     htf_timeframe: str           = getattr(Config, "HTF_TIMEFRAME", "H1")
     active_symbols: list         = [s.strip().upper() for s in getattr(Config, "TRADING_SYMBOLS", ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"])]
-    available_symbols: list      = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+    available_symbols: list      = [
+        "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+        "EURGBP", "EURJPY", "GBPJPY",
+        "GOLD", "XAUUSD", "SILVER", "USOIL",
+        "US30", "US100", "US500", "GER40",
+        "BTCUSD", "ETHUSD", "SOLUSD"
+    ]
 
 
 
@@ -725,7 +731,16 @@ def export_history(symbol: str = "EURUSD", timeframe: str = "M15", num_bars: int
             aliases = {
                 "XAUUSD": ["GOLD", "XAUUSD#", "GOLDmicro"],
                 "GOLD": ["XAUUSD", "XAUUSD#", "GOLDmicro"],
-                "BTCUSD": ["BTCUSD#", "BITCOIN"]
+                "SILVER": ["XAGUSD", "SILVER#"],
+                "XAGUSD": ["SILVER", "SILVER#"],
+                "USOIL": ["WTI", "OIL", "USOIL#"],
+                "US30": ["DJ30", "US30Cash", "US30#", "WS30"],
+                "US100": ["NAS100", "US100Cash", "US100#", "NQ100"],
+                "US500": ["SPX500", "US500Cash", "US500#", "ES500"],
+                "GER40": ["DAX40", "GER40Cash", "GER40#", "DE40"],
+                "BTCUSD": ["BTCUSD#", "BITCOIN", "BTC"],
+                "ETHUSD": ["ETHUSD#", "ETHEREUM", "ETH"],
+                "SOLUSD": ["SOLUSD#", "SOLANA", "SOL"],
             }
             if symbol.upper() in aliases:
                 for alias in aliases[symbol.upper()]:
@@ -1705,10 +1720,20 @@ def get_market_overview():
             
             history_24h = [{"time": f"-{24-i}h", "price": p} for i, p in enumerate(close_prices)]
             
+            sym_u = symbol.upper()
+            if any(c in sym_u for c in ["BTC", "ETH", "SOL"]):
+                category = "Crypto"
+            elif any(c in sym_u for c in ["GOLD", "XAU", "SILVER", "XAG", "OIL", "WTI"]):
+                category = "Matière Première"
+            elif any(c in sym_u for c in ["US30", "US100", "US500", "GER40", "DAX", "SPX", "NAS", "DJ"]):
+                category = "Indice"
+            else:
+                category = "Forex"
+
             results.append({
                 "symbol": symbol,
                 "name": symbol,
-                "category": "Forex",
+                "category": category,
                 "currentPrice": current_price,
                 "change24hUsd": round(change_usd, 5),
                 "change24hPct": round(change_pct, 2),

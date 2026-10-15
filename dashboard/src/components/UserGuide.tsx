@@ -265,7 +265,9 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               desc: "Sélectionnez vos profils de trading, ajustez les timeframes MTF et modifiez les paramètres sans redémarrer le bot.",
               details: [
                 "Matrice des 4 Profils : Basculez en un clic entre Scalping M5, Day Trading M15, Institutional MTF (H1+M5 recommandé) et Swing Trading H1.",
-                "Sélecteurs de Symboles ON/OFF : Activez ou mettez en pause chaque actif individuellement (boutons pills dans le Header et grille dans l'onglet Stratégies).",
+                "Univers Étendu de 21 Actifs : Support complet sur 4 classes : Forex Majeurs & Crosses (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, NZDUSD, EURGBP, EURJPY, GBPJPY), Métaux & Énergie (GOLD, XAUUSD, SILVER, USOIL), Indices (US30, US100, US500, GER40) et Cryptos (BTCUSD, ETHUSD, SOLUSD).",
+                "Filtres par Catégorie & Recherche : Onglets 'Tous', 'Forex', 'Matières Premières', 'Indices', 'Cryptos' avec actions groupées 'Activer / Pause catégorie' et recherche instantanée.",
+                "Sélecteurs de Symboles ON/OFF : Activez ou mettez en pause chaque actif individuellement (pilules scrollables dans le Header et grille responsive dans l'onglet Stratégies).",
                 "Curseurs Timeframe : Réglez le Timeframe Primaire (LTF de M1 à H4) et le Timeframe Supérieur (HTF de M15 à D1).",
                 "Toggle MTF Confluence : Active ou désactive le filtre de biais macroéconomique H1 sur les entrées LTF.",
                 "Multiplicateurs SL/TP & Trailing : Ajustez dynamiquement vos multiplicateurs ATR et le suivi du profit.",
@@ -422,8 +424,8 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               r: "Dans l'onglet 'Stratégies & Risque', vous pouvez choisir entre Scalping M5 (haute vélocité), Day Trading M15 (équilibre standard), Institutional MTF (recommandé : analyse H1 pour la tendance + entrée chirurgicale M5) et Swing Trading H1 (grands mouvements). En un clic, le profil met à jour la mémoire du bot et s'enregistre dans votre fichier .env.",
             },
             {
-              q: "Comment activer ou mettre en pause un actif spécifique (ex: couper le Bitcoin ou l'Or) ?",
-              r: "Vous disposez de boutons pills réactifs directement dans le Header (en haut à côté des indicateurs système) et d'un gestionnaire complet dans l'onglet 'Stratégies & Risque'. Cliquez sur un symbole pour le basculer entre 'ON' (Trading Actif) et 'OFF' (En Pause). La mise en pause empêche l'ouverture de nouveaux trades sur ce symbole, tandis que vos positions déjà ouvertes continuent d'être gérées et clôturées en toute sécurité par leurs Stop Loss et Take Profit.",
+              q: "Comment activer ou mettre en pause un actif spécifique (Forex, Or, Indices, Cryptos) ?",
+              r: "Vous disposez d'un univers étendu de 21 actifs organisés en 4 catégories (Forex, Matières Premières, Indices, Cryptos). Vous pouvez les piloter via les badges cliquables et scrollables dans le Header ou via la grille détaillée avec recherche et filtres de catégorie dans l'onglet 'Stratégies & Risque'. Cliquez sur un symbole pour le basculer entre 'ON' (Trading Actif) et 'OFF' (En Pause). La mise en pause bloque instantanément toute nouvelle entrée sur cet actif, tandis que vos positions existantes restent protégées par leurs SL/TP jusqu'à leur clôture.",
             },
             {
               q: "Pourquoi le statut indique-t-il 'EMBARGO NEWS' et bloque-t-il mes trades ?",

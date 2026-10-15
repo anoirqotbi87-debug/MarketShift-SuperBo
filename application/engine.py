@@ -118,7 +118,13 @@ class Engine:
 
         # Multi-symbole : support des symboles disponibles et activables dynamiquement
         self.symbols: list = [s.strip().upper() for s in Config.TRADING_SYMBOLS]
-        self.available_symbols: list = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        self.available_symbols: list = [
+            "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+            "EURGBP", "EURJPY", "GBPJPY",
+            "GOLD", "XAUUSD", "SILVER", "USOIL",
+            "US30", "US100", "US500", "GER40",
+            "BTCUSD", "ETHUSD", "SOLUSD"
+        ]
         for s in self.symbols:
             if s not in self.available_symbols:
                 self.available_symbols.append(s)

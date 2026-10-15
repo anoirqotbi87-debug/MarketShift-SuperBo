@@ -7,6 +7,7 @@ import {
   Loader2,
   Newspaper,
   Save,
+  Search,
   Settings2,
   Sparkles,
   TrendingUp,
@@ -16,6 +17,38 @@ import { fetchKelly, fetchSettings, updateSettings } from "@/lib/api";
 import type { KellyApiResponse, RuntimeSettings } from "@/types/trading";
 
 const NEWS_FILTER_KEY = "marketshift.news_filter";
+
+interface SymbolMeta {
+  symbol: string;
+  name: string;
+  category: "Forex" | "Matières Premières" | "Indices" | "Cryptos";
+}
+
+const SYMBOL_DIRECTORY: Record<string, SymbolMeta> = {
+  EURUSD: { symbol: "EURUSD", name: "Euro / US Dollar", category: "Forex" },
+  GBPUSD: { symbol: "GBPUSD", name: "Livre Sterling / Dollar", category: "Forex" },
+  USDJPY: { symbol: "USDJPY", name: "Dollar / Yen Japonais", category: "Forex" },
+  AUDUSD: { symbol: "AUDUSD", name: "Dollar Australien / Dollar", category: "Forex" },
+  USDCAD: { symbol: "USDCAD", name: "Dollar US / Dollar Canadien", category: "Forex" },
+  USDCHF: { symbol: "USDCHF", name: "Dollar US / Franc Suisse", category: "Forex" },
+  NZDUSD: { symbol: "NZDUSD", name: "Dollar Néo-Zélandais / Dollar", category: "Forex" },
+  EURGBP: { symbol: "EURGBP", name: "Euro / Livre Sterling", category: "Forex" },
+  EURJPY: { symbol: "EURJPY", name: "Euro / Yen Japonais", category: "Forex" },
+  GBPJPY: { symbol: "GBPJPY", name: "Livre Sterling / Yen Japonais", category: "Forex" },
+  GOLD:   { symbol: "GOLD",   name: "Or Spot (Gold)", category: "Matières Premières" },
+  XAUUSD: { symbol: "XAUUSD", name: "Or / Dollar US (XAU)", category: "Matières Premières" },
+  SILVER: { symbol: "SILVER", name: "Argent Spot (Silver)", category: "Matières Premières" },
+  USOIL:  { symbol: "USOIL",  name: "Pétrole WTI Crude", category: "Matières Premières" },
+  US30:   { symbol: "US30",   name: "Dow Jones Industrial 30", category: "Indices" },
+  US100:  { symbol: "US100",  name: "Nasdaq 100 Index", category: "Indices" },
+  US500:  { symbol: "US500",  name: "S&P 500 Index", category: "Indices" },
+  GER40:  { symbol: "GER40",  name: "DAX 40 Allemagne", category: "Indices" },
+  BTCUSD: { symbol: "BTCUSD", name: "Bitcoin / Dollar", category: "Cryptos" },
+  ETHUSD: { symbol: "ETHUSD", name: "Ethereum / Dollar", category: "Cryptos" },
+  SOLUSD: { symbol: "SOLUSD", name: "Solana / Dollar", category: "Cryptos" },
+};
+
+const DEFAULT_AVAILABLE_SYMBOLS = Object.keys(SYMBOL_DIRECTORY);
 
 const DEFAULT_SETTINGS: RuntimeSettings = {
   sl_multiplier: 1.5,
@@ -29,7 +62,7 @@ const DEFAULT_SETTINGS: RuntimeSettings = {
   mtf_enabled: true,
   htf_timeframe: "H1",
   active_symbols: ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
-  available_symbols: ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
+  available_symbols: DEFAULT_AVAILABLE_SYMBOLS,
 };
 
 interface ProfilePreset {
@@ -166,6 +199,24 @@ export default function ConfigPanel() {
   const [amdWeight, setAmdWeight] = useState(0.5);
   const [newsFilterEnabled, setNewsFilterEnabled] = useState(true);
   const [minNewsScore, setMinNewsScore] = useState(-0.6);
+  const [symbolCategory, setSymbolCategory] = useState<"Tous" | "Forex" | "Matières Premières" | "Indices" | "Cryptos">("Tous");
+  const [symbolSearch, setSymbolSearch] = useState<string>("");
+
+  const getSymbolMeta = (sym: string): SymbolMeta => {
+    return (
+      SYMBOL_DIRECTORY[sym] || {
+        symbol: sym,
+        name: sym,
+        category: sym.includes("BTC") || sym.includes("ETH") || sym.includes("SOL")
+          ? "Cryptos"
+          : sym.includes("GOLD") || sym.includes("XAU") || sym.includes("SILVER") || sym.includes("OIL")
+          ? "Matières Premières"
+          : sym.includes("30") || sym.includes("100") || sym.includes("500") || sym.includes("40")
+          ? "Indices"
+          : "Forex",
+      }
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -180,7 +231,7 @@ export default function ConfigPanel() {
           mtf_enabled: s.mtf_enabled !== undefined ? s.mtf_enabled : true,
           htf_timeframe: s.htf_timeframe || prev.htf_timeframe || "H1",
           active_symbols: s.active_symbols || prev.active_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
-          available_symbols: s.available_symbols || prev.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
+          available_symbols: s.available_symbols || prev.available_symbols || DEFAULT_AVAILABLE_SYMBOLS,
         }));
       }
       if (k) setKelly(k);
@@ -238,8 +289,24 @@ export default function ConfigPanel() {
   const setAllSymbols = (enable: boolean) => {
     setSettings((prev) => ({
       ...prev,
-      active_symbols: enable ? [...(prev.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"])] : [],
+      active_symbols: enable ? [...(prev.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)] : [],
     }));
+  };
+
+  const toggleCategorySymbols = (cat: string, enable: boolean) => {
+    setSettings((prev) => {
+      const avail = prev.available_symbols || DEFAULT_AVAILABLE_SYMBOLS;
+      const catSyms = avail.filter((s) => cat === "Tous" || getSymbolMeta(s).category === cat);
+      const current = new Set(prev.active_symbols || []);
+      catSyms.forEach((s) => {
+        if (enable) current.add(s);
+        else current.delete(s);
+      });
+      return {
+        ...prev,
+        active_symbols: Array.from(current),
+      };
+    });
   };
 
   const save = async () => {
@@ -432,7 +499,7 @@ export default function ConfigPanel() {
 
         {/* ── 3. SÉLECTION DES SYMBOLES ACTIFS (UNIVERS DE TRADING) ── */}
         <section className="card p-5">
-          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-800/80 pb-3">
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-zinc-800/80 pb-3">
             <div>
               <div className="flex items-center gap-2">
                 <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400 font-mono text-xs font-bold">
@@ -443,12 +510,12 @@ export default function ConfigPanel() {
                 </h2>
               </div>
               <p className="text-xs text-zinc-400 mt-1">
-                Activez ou mettez en pause les prises de positions individuelles par actif en un clic.
+                Activez ou mettez en pause les prises de positions individuelles par actif en un clic (Forex, Métaux, Énergie, Indices, Cryptos).
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1">
-                <span className="text-cyan-400 font-bold">{(settings.active_symbols || []).length}</span> / {(settings.available_symbols || []).length} actifs
+                <span className="text-cyan-400 font-bold">{(settings.active_symbols || []).length}</span> / {(settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS).length} actifs
               </span>
               <button
                 type="button"
@@ -467,52 +534,143 @@ export default function ConfigPanel() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {(settings.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]).map((sym) => {
-              const isAct = (settings.active_symbols || []).includes(sym);
-              const category = sym.includes("BTC") ? "Crypto" : sym.includes("GOLD") || sym.includes("XAU") ? "Matière Première" : "Forex Majeur";
-              return (
-                <div
-                  key={sym}
-                  onClick={() => toggleSymbolConfig(sym)}
-                  className={`group relative flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition select-none ${
-                    isAct
-                      ? "bg-cyan-500/5 border-cyan-500/40 hover:border-cyan-400 shadow-sm shadow-cyan-500/10"
-                      : "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 opacity-60 hover:opacity-80"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="font-mono text-xs font-bold text-zinc-100">{sym}</span>
-                      <p className="text-[10px] text-zinc-500">{category}</p>
-                    </div>
-                    {/* Toggle switch visual */}
-                    <div
-                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
-                        isAct ? "bg-cyan-500" : "bg-zinc-700"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                          isAct ? "translate-x-4" : "translate-x-1"
-                        }`}
-                      />
-                    </div>
-                  </div>
+          {/* Filtres par Catégorie & Recherche */}
+          <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(["Tous", "Forex", "Matières Premières", "Indices", "Cryptos"] as const).map((cat) => {
+                const isSelected = symbolCategory === cat;
+                const count = cat === "Tous"
+                  ? (settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS).length
+                  : (settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS).filter((s) => getSymbolMeta(s).category === cat).length;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSymbolCategory(cat)}
+                    className={`px-2.5 py-1 text-xs rounded-lg font-medium transition flex items-center gap-1.5 border ${
+                      isSelected
+                        ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50"
+                        : "bg-zinc-900/60 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700"
+                    }`}
+                  >
+                    <span>{cat}</span>
+                    <span className="text-[10px] font-mono px-1 rounded bg-black/40 text-zinc-400">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-                  <div className="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-zinc-800/60 pt-2">
-                    <span className={isAct ? "text-cyan-400 font-semibold" : "text-zinc-500"}>
-                      {isAct ? "Trading Actif" : "En Pause"}
-                    </span>
-                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                      isAct ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800 text-zinc-500"
-                    }`}>
-                      {isAct ? "ON" : "OFF"}
-                    </span>
-                  </div>
+            <div className="flex items-center gap-2">
+              {symbolCategory !== "Tous" && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => toggleCategorySymbols(symbolCategory, true)}
+                    className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                  >
+                    Activer {symbolCategory}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleCategorySymbols(symbolCategory, false)}
+                    className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400"
+                  >
+                    Pause {symbolCategory}
+                  </button>
                 </div>
-              );
-            })}
+              )}
+              <div className="relative min-w-[180px]">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-500" />
+                <input
+                  type="text"
+                  placeholder="Rechercher actif..."
+                  value={symbolSearch}
+                  onChange={(e) => setSymbolSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1 text-xs rounded-lg bg-zinc-900/90 border border-zinc-800 text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Grille de cartes symboles */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {(settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)
+              .filter((sym) => {
+                const meta = getSymbolMeta(sym);
+                if (symbolCategory !== "Tous" && meta.category !== symbolCategory) {
+                  return false;
+                }
+                if (symbolSearch.trim()) {
+                  const q = symbolSearch.toLowerCase().trim();
+                  return sym.toLowerCase().includes(q) || meta.name.toLowerCase().includes(q);
+                }
+                return true;
+              })
+              .map((sym) => {
+                const isAct = (settings.active_symbols || []).includes(sym);
+                const meta = getSymbolMeta(sym);
+                const catClass =
+                  meta.category === "Cryptos"
+                    ? "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                    : meta.category === "Matières Premières"
+                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                    : meta.category === "Indices"
+                    ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                    : "bg-blue-500/10 text-blue-400 border-blue-500/20";
+
+                return (
+                  <div
+                    key={sym}
+                    onClick={() => toggleSymbolConfig(sym)}
+                    className={`group relative flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition select-none ${
+                      isAct
+                        ? "bg-cyan-500/5 border-cyan-500/40 hover:border-cyan-400 shadow-sm shadow-cyan-500/10"
+                        : "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 opacity-60 hover:opacity-80"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-bold text-zinc-100">{sym}</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded border font-medium ${catClass}`}>
+                            {meta.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 mt-1 truncate" title={meta.name}>
+                          {meta.name}
+                        </p>
+                      </div>
+                      {/* Toggle switch visual */}
+                      <div
+                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
+                          isAct ? "bg-cyan-500" : "bg-zinc-700"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+                            isAct ? "translate-x-4" : "translate-x-1"
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-zinc-800/60 pt-2">
+                      <span className={isAct ? "text-cyan-400 font-semibold" : "text-zinc-500"}>
+                        {isAct ? "Trading Actif" : "En Pause"}
+                      </span>
+                      <span
+                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                          isAct ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800 text-zinc-500"
+                        }`}
+                      >
+                        {isAct ? "ON" : "OFF"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
           <p className="text-[10px] text-zinc-500 mt-3 font-mono leading-relaxed">
             💡 <b>Sécurité garantie</b> : Désactiver un actif met en pause la détection et l&apos;ouverture de nouveaux ordres sur celui-ci. Les positions déjà ouvertes sur cet actif continuent d&apos;être protégées et clôturées normalement par le Stop Loss, le Take Profit et le Trailing Stop.

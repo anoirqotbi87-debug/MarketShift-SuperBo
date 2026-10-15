@@ -4,7 +4,11 @@ import { useState } from "react";
 import { Bell, BellOff, Plus, Trash2 } from "lucide-react";
 import type { PriceAlertItem } from "@/types/trading";
 
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+const SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+  "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+];
 
 /** Alertes de prix client-side (porté du 5173 PriceAlertsConfig). */
 export default function PriceAlerts() {

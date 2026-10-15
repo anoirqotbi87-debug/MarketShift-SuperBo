@@ -5,7 +5,11 @@ import { Calculator } from "lucide-react";
 import { fetchKelly } from "@/lib/api";
 import type { KellyApiResponse, KellyPositionSize, WsSnapshot } from "@/types/trading";
 
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+const SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+  "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+];
 
 interface KellySizerProps {
   snapshot: WsSnapshot;

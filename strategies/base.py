@@ -101,12 +101,15 @@ class StrategyBase(IStrategy):
             tp_pips *= 3.0
             
         # Limites de sécurité dynamiques selon l'actif
-        if pip_size >= 1.0:  # Crypto (BTC, ETH) -> pips = dollars
-            sl_pips = max(50.0, min(sl_pips, 5000.0))
-            tp_pips = max(100.0, min(tp_pips, 10000.0))
+        if pip_size >= 1.0:  # Crypto (BTC, ETH, SOL) ou Indices (US30, US100, US500, GER40)
+            sl_pips = max(20.0, min(sl_pips, 5000.0))
+            tp_pips = max(40.0, min(tp_pips, 10000.0))
         elif pip_size == 0.1: # XAUUSD / GOLD -> pips = 0.1$
             sl_pips = max(10.0, min(sl_pips, 1000.0))
             tp_pips = max(20.0, min(tp_pips, 2000.0))
+        elif pip_size == 0.001 or pip_size == 0.01: # JPY, SILVER, OIL
+            sl_pips = max(10.0, min(sl_pips, 500.0))
+            tp_pips = max(15.0, min(tp_pips, 1000.0))
         else: # Forex Standard
             sl_pips = max(15.0, min(sl_pips, 200.0))
             tp_pips = max(20.0, min(tp_pips, 400.0))
@@ -116,17 +119,22 @@ class StrategyBase(IStrategy):
     @staticmethod
     def get_pip_size(symbol: str) -> float:
         """Retourne la taille d'un pip selon le symbole.
-        Gère les suffixes broker XM (#, micro) et noms alternatifs (GOLD# = Or).
+        Gère les suffixes broker XM (#, micro) et noms alternatifs (GOLD# = Or, etc.).
         """
         # Normaliser : supprimer #, . et suffixes broker
-        s = symbol.upper().replace('#', '').replace('.', '').replace('MICRO', '')
+        s = symbol.upper().replace('#', '').replace('.', '').replace('MICRO', '').replace('CASH', '')
         if 'JPY' in s:
-            return 0.01     # Paires JPY
+            return 0.01     # Paires JPY (ex: USDJPY, EURJPY, GBPJPY)
         elif 'XAU' in s or s == 'GOLD':
-            return 0.1      # Or (XAUUSD ou GOLD#)
-        elif 'XAG' in s or s == 'SILVER':
-            return 0.001    # Argent
-        elif 'BTC' in s or 'ETH' in s:
-            return 1.0      # Crypto
+            return 0.1      # Or (XAUUSD ou GOLD)
+        elif 'XAG' in s or 'SILVER' in s:
+            return 0.001    # Argent (XAGUSD ou SILVER)
+        elif any(oil in s for oil in ['OIL', 'WTI', 'BRENT']):
+            return 0.01     # Pétrole (USOIL, WTI)
+        elif any(idx in s for idx in ['US30', 'US100', 'US500', 'GER40', 'DAX', 'NAS', 'SPX', 'DJ30', 'DE40']):
+            return 1.0      # Indices boursiers (1 point)
+        elif any(c in s for c in ['BTC', 'ETH', 'SOL']):
+            return 1.0      # Cryptomonnaies (BTCUSD, ETHUSD, SOLUSD)
         else:
-            return 0.0001   # Forex standard (EUR/USD, GBP/USD, etc.)
+            return 0.0001   # Forex standard (EURUSD, GBPUSD, AUDUSD, USDCAD, USDCHF, NZDUSD, EURGBP, etc.)
+

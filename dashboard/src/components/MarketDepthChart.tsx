@@ -5,7 +5,11 @@ import { BookOpen } from "lucide-react";
 import { fetchMarketDepth } from "@/lib/api";
 import type { MarketDepthData } from "@/types/trading";
 
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+const SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+  "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+];
 
 interface MarketDepthChartProps {
   symbol?: string;

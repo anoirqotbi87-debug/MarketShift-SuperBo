@@ -30,7 +30,11 @@ import {
 } from "@/lib/api";
 import type { MlLatencyPoint, MlStatus, PredictResponse } from "@/types/trading";
 
-const SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+const SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+  "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+];
 
 const ARCHITECTURES = [
   { id: "XGBoost + LSTM Ensemble", desc: "Hybride recommandé: Tabulaire XGBoost + Séries Temporelles LSTM" },

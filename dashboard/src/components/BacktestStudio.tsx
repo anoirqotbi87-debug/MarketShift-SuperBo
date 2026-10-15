@@ -18,7 +18,11 @@ import type { BacktestReport } from "@/types/trading";
 const PERIODS = ["1 mois", "3 mois", "1 an"] as const;
 type Period = (typeof PERIODS)[number];
 
-const BACKTEST_SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+const BACKTEST_SYMBOLS = [
+  "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD", "USDCHF", "NZDUSD",
+  "EURGBP", "EURJPY", "GBPJPY", "GOLD", "XAUUSD", "SILVER", "USOIL",
+  "US30", "US100", "US500", "GER40", "BTCUSD", "ETHUSD", "SOLUSD"
+];
 
 interface SimulatedRow {
   time: string;
