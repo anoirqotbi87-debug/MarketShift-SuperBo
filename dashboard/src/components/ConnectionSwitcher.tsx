@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Globe, Wifi, WifiOff } from "lucide-react";
-import { DEFAULT_PROFILES, getConnection, setConnection } from "@/lib/api";
+import { DEFAULT_PROFILES, getConnection, setConnection, getApiKey, setApiKey } from "@/lib/api";
 import type { ConnectionProfile } from "@/types/trading";
 
 interface ConnectionSwitcherProps {
@@ -14,10 +14,12 @@ export default function ConnectionSwitcher({ connected, onReconnect }: Connectio
   const [profile, setProfile] = useState<ConnectionProfile>(() => getConnection());
   const [open, setOpen] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setProfile(getConnection());
+    setApiKeyInput(getApiKey());
   }, []);
 
   const applyProfile = (p: ConnectionProfile) => {
@@ -103,6 +105,36 @@ export default function ConnectionSwitcher({ connected, onReconnect }: Connectio
               </div>
               <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
                 La sélection est persistée en localStorage. Le WebSocket se reconnecte automatiquement.
+              </p>
+            </div>
+
+            <div className="mt-3 border-t border-zinc-800/70 pt-3">
+              <p className="mb-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                Clé API Secrète (X-API-Key)
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Clé API (32+ caractères)"
+                  className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600 focus:border-cyan-700 focus:outline-none"
+                />
+                <button
+                  onClick={() => {
+                    const trimmed = apiKeyInput.trim();
+                    setApiKey(trimmed);
+                    setMsg("Clé API enregistrée localement.");
+                    setTimeout(() => setMsg(null), 3000);
+                    setTimeout(onReconnect, 150);
+                  }}
+                  className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+                >
+                  OK
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-zinc-600">
+                Sauvegardée dans votre navigateur (localStorage).
               </p>
             </div>
 

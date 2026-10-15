@@ -39,9 +39,34 @@ import type {
 
 const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:8000";
 const ENV_WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
-
 const STORAGE_KEY = "marketshift.connection";
+const API_KEY_STORAGE_KEY = "marketshift.apikey";
+
+export function getApiKey(): string {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = window.localStorage.getItem(API_KEY_STORAGE_KEY);
+      if (stored !== null && stored.trim() !== "") {
+        return stored.trim();
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return process.env.NEXT_PUBLIC_API_KEY || "";
+}
+
+export function setApiKey(key: string): void {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(API_KEY_STORAGE_KEY, key.trim());
+    } catch {
+      // ignore
+    }
+  }
+}
+
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 /** Profil provenant des variables d'environnement (.env) — défaut de build. */
 const ENV_PROFILE: ConnectionProfile = {
@@ -115,11 +140,12 @@ export { DEFAULT_PROFILES, ENV_API_URL, ENV_WS_URL, API_KEY };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
+    const key = getApiKey();
     const res = await fetch(`${currentApiUrl}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
-        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+        ...(key ? { "X-API-Key": key } : {}),
         ...(init?.headers ?? {}),
       },
     });
@@ -142,12 +168,13 @@ async function requestWithTimeout<T>(
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const key = getApiKey();
     const res = await fetch(`${currentApiUrl}${path}`, {
       method: "POST",
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
-        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+        ...(key ? { "X-API-Key": key } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -235,9 +262,10 @@ export async function startOptimize(params: {
   if (params.file) form.append("file", params.file);
 
   try {
+    const key = getApiKey();
     const res = await fetch(`${currentApiUrl}/optimize`, {
       method: "POST",
-      headers: API_KEY ? { "X-API-Key": API_KEY } : {},
+      headers: key ? { "X-API-Key": key } : {},
       body: form,
     });
     if (!res.ok) return null;
@@ -275,9 +303,10 @@ export async function runBacktest(params: {
   form.append("file", params.file);
 
   try {
+    const key = getApiKey();
     const res = await fetch(`${currentApiUrl}/backtest`, {
       method: "POST",
-      headers: API_KEY ? { "X-API-Key": API_KEY } : {},
+      headers: key ? { "X-API-Key": key } : {},
       body: form,
     });
     if (!res.ok) return null;
@@ -350,11 +379,12 @@ export async function fetchHistory(symbol = "EURUSD", timeframe = "M15", bars = 
 
 export async function retrainMlModel(): Promise<{ status?: string; error?: string } | null> {
   try {
+    const key = getApiKey();
     const res = await fetch(`${currentApiUrl}/ml/retrain`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+        ...(key ? { "X-API-Key": key } : {}),
       },
     });
     if (!res.ok) return null;

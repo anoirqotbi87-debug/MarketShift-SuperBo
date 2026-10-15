@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WsSnapshot } from "@/types/trading";
-import { getConnection } from "@/lib/api";
+import { getConnection, getApiKey } from "@/lib/api";
 
 /**
  * Client WebSocket temps réel avec reconnexion exponentielle.
@@ -14,7 +14,6 @@ import { getConnection } from "@/lib/api";
  */
 
 const WS_FALLBACK = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000];
 
@@ -66,7 +65,8 @@ export function useMarketShiftWS() {
 
     // URL dynamique : suit la connexion active (bascule localhost ↔ tunnel).
     const wsUrl = getConnection().wsUrl || WS_FALLBACK;
-    const url = `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}`;
+    const apiKey = getApiKey();
+    const url = apiKey ? `${wsUrl}?api_key=${encodeURIComponent(apiKey)}` : wsUrl;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
