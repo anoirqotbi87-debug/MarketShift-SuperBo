@@ -113,7 +113,9 @@ export interface WsSnapshot {
   logs: EngineLog[];
   killSwitch: boolean;
   isPaused: boolean;
+  macro?: MacroEmbargoSummary;
 }
+
 
 export interface EquityPoint {
   time: string;
@@ -331,7 +333,48 @@ export interface NewsEvent {
   sentimentScore: number;
   actionTaken: string;
   severity: "NORMAL" | "WARNING" | "CRITICAL";
+  country?: string;
+  isInEmbargo?: boolean;
+  status?: "IN_EMBARGO" | "UPCOMING" | "PASSED";
+  affectedSymbols?: string[];
+  timestampUtc?: string;
 }
+
+export interface MacroNewsEvent {
+  id: string;
+  title: string;
+  country: string;
+  impact: string;
+  date: string;
+  timestampUtc: string;
+  timeUntilMinutes: number;
+  windowStartUtc: string;
+  windowEndUtc: string;
+  isInEmbargo: boolean;
+  status: "IN_EMBARGO" | "UPCOMING" | "PASSED";
+  affectedSymbols: string[];
+}
+
+export interface MacroEmbargoSummary {
+  isAnyEmbargoActive: boolean;
+  activeEventsCount: number;
+  activeEvents: MacroNewsEvent[];
+  blockedSymbols: string[];
+  nextEvent: MacroNewsEvent | null;
+  totalHighImpactLoaded: number;
+  pauseBeforeMinutes: number;
+  pauseAfterMinutes: number;
+  lastFetchUtc: string | null;
+  serverTimeUtc: string;
+}
+
+export interface MacroNewsResponse {
+  summary: MacroEmbargoSummary;
+  events: MacroNewsEvent[];
+  symbols: string[];
+  filterActive: boolean;
+}
+
 
 export interface MlStatus {
   trained: boolean;

@@ -78,50 +78,133 @@ class NewsFilter:
         except Exception as e:
             logging.error(f"[NewsFilter] ❌ Erreur réseau lors du téléchargement : {e}")
 
+    def get_currencies_for_symbol(self, symbol: str) -> List[str]:
+        """Extrait les devises associées à un symbole de trading."""
+        currencies = []
+        for curr in ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "NZD", "CHF"]:
+            if curr in symbol:
+                currencies.append(curr)
+        if symbol in ["BTCUSD", "ETHUSD", "XAUUSD", "GOLD"]:
+            if "USD" not in currencies:
+                currencies.append("USD")
+        return currencies
+
+    def get_affected_symbols_for_currency(self, currency: str, all_symbols: List[str]) -> List[str]:
+        """Retourne la liste des symboles affectés par une devise donnée."""
+        return [s for s in all_symbols if currency in self.get_currencies_for_symbol(s)]
+
+    def get_detailed_events(self, all_symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+        """
+        Retourne la liste détaillée et horodatée des annonces High Impact
+        avec statut d'embargo précis pour chaque événement.
+        """
+        now = datetime.now(timezone.utc)
+        symbols = all_symbols or ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        results = []
+
+        for item in self.news_events:
+            news_time = item.get("parsed_date")
+            if not news_time:
+                continue
+
+            window_start = news_time - self.pause_before
+            window_end = news_time + self.pause_after
+            time_until_sec = (news_time - now).total_seconds()
+            time_until_min = round(time_until_sec / 60.0, 1)
+
+            is_in_embargo = window_start <= now <= window_end
+            
+            if is_in_embargo:
+                status = "IN_EMBARGO"
+            elif now > window_end:
+                status = "PASSED"
+            else:
+                status = "UPCOMING"
+
+            currency = item.get("country", "")
+            affected = self.get_affected_symbols_for_currency(currency, symbols)
+
+            results.append({
+                "id": f"{currency}_{item.get('date')}_{item.get('title')}".replace(" ", "_"),
+                "title": item.get("title", "Annonce Inconnue"),
+                "country": currency,
+                "impact": item.get("impact", "High"),
+                "date": item.get("date", ""),
+                "timestampUtc": news_time.isoformat(),
+                "timeUntilMinutes": time_until_min,
+                "windowStartUtc": window_start.isoformat(),
+                "windowEndUtc": window_end.isoformat(),
+                "isInEmbargo": is_in_embargo,
+                "status": status,
+                "affectedSymbols": affected
+            })
+
+        # Trier chronologiquement
+        results.sort(key=lambda x: x["timestampUtc"])
+        return results
+
+    def get_embargo_summary(self, all_symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Retourne un résumé de l'état global de l'embargo macro pour le dashboard.
+        """
+        now = datetime.now(timezone.utc)
+        symbols = all_symbols or ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        events = self.get_detailed_events(symbols)
+
+        active_events = [e for e in events if e["isInEmbargo"]]
+        blocked_symbols = sorted(list(set(s for e in active_events for s in e["affectedSymbols"])))
+        
+        # Trouver la prochaine annonce future (status == UPCOMING)
+        upcoming_events = [e for e in events if e["status"] == "UPCOMING"]
+        next_event = upcoming_events[0] if upcoming_events else None
+
+        return {
+            "isAnyEmbargoActive": len(active_events) > 0,
+            "activeEventsCount": len(active_events),
+            "activeEvents": active_events,
+            "blockedSymbols": blocked_symbols,
+            "nextEvent": next_event,
+            "totalHighImpactLoaded": len(self.news_events),
+            "pauseBeforeMinutes": int(self.pause_before.total_seconds() // 60),
+            "pauseAfterMinutes": int(self.pause_after.total_seconds() // 60),
+            "lastFetchUtc": self.last_fetch.isoformat() if self.last_fetch else None,
+            "serverTimeUtc": now.isoformat()
+        }
+
     def is_news_embargo(self, symbol: str) -> bool:
         """
         Vérifie si on est actuellement dans la fenêtre de pause d'une news majeure
-        qui concerne le symbole donné.
+        qui concerne le symbole donné. Évite le spam de logs cycliques.
         """
         if not self.news_events:
             return False
 
         now = datetime.now(timezone.utc)
-        logging.debug(
-            f"[NewsFilter] [{symbol}] Contrôle embargo news: {len(self.news_events)} "
-            f"annonces High Impact en mémoire, fenêtre ±{self.pause_before.seconds//60}m."
-        )
-        # Extraire les devises du symbole (ex: EURUSD -> EUR, USD / BTCUSD -> USD)
-        currencies_to_check = []
-        if "USD" in symbol: currencies_to_check.append("USD")
-        if "EUR" in symbol: currencies_to_check.append("EUR")
-        if "GBP" in symbol: currencies_to_check.append("GBP")
-        if "JPY" in symbol: currencies_to_check.append("JPY")
-        if "CAD" in symbol: currencies_to_check.append("CAD")
-        if "AUD" in symbol: currencies_to_check.append("AUD")
-        if "NZD" in symbol: currencies_to_check.append("NZD")
-        if "CHF" in symbol: currencies_to_check.append("CHF")
-        
-        # Si cryptos ou Gold, le USD est roi
-        if symbol in ["BTCUSD", "ETHUSD", "XAUUSD", "GOLD"]:
-            if "USD" not in currencies_to_check:
-                currencies_to_check.append("USD")
-                
+        currencies_to_check = self.get_currencies_for_symbol(symbol)
         if not currencies_to_check:
-            return False # Fallback si format inconnu
-            
+            return False
+
         for news in self.news_events:
-            if news["country"] in currencies_to_check:
-                news_time = news["parsed_date"]
+            if news.get("country") in currencies_to_check:
+                news_time = news.get("parsed_date")
+                if not news_time:
+                    continue
                 window_start = news_time - self.pause_before
                 window_end = news_time + self.pause_after
                 
                 if window_start <= now <= window_end:
                     time_until = (news_time - now).total_seconds() / 60.0
                     if time_until > 0:
-                        logging.warning(f"[NewsFilter] 🚨 EMBARGO: Annonce '{news['title']}' dans {time_until:.0f} mins pour {news['country']}.")
+                        logging.warning(
+                            f"[NewsFilter] 🚨 EMBARGO ACTIF sur {symbol} : Annonce '{news['title']}' "
+                            f"dans {time_until:.0f} mins ({news['country']}). Trades suspendus."
+                        )
                     else:
-                        logging.warning(f"[NewsFilter] 🚨 EMBARGO: L'annonce '{news['title']}' est sortie il y a {abs(time_until):.0f} mins ({news['country']}).")
+                        logging.warning(
+                            f"[NewsFilter] 🚨 EMBARGO ACTIF sur {symbol} : Annonce '{news['title']}' "
+                            f"sortie il y a {abs(time_until):.0f} mins ({news['country']}). Trades suspendus."
+                        )
                     return True
                     
         return False
+

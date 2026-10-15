@@ -10,10 +10,12 @@ import {
   Play,
   Power,
   RefreshCcw,
+  ShieldAlert,
   ShieldCheck,
   Wifi,
   WifiOff,
 } from "lucide-react";
+
 import { sendControlCommand } from "@/lib/api";
 import type { WsSnapshot } from "@/types/trading";
 import EmergencyModal from "./EmergencyModal";
@@ -129,7 +131,23 @@ export default function Header({
             <CircleOff className="h-3 w-3" /> PAUSE
           </span>
         )}
+        {snapshot.macro?.isAnyEmbargoActive ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-md border border-rose-800 bg-rose-500/15 px-2 py-1 font-semibold text-rose-400 animate-pulse text-[11px]"
+            title={`Embargo actif sur: ${snapshot.macro.blockedSymbols.join(", ")}`}
+          >
+            <ShieldAlert className="h-3 w-3" /> EMBARGO NEWS ({snapshot.macro.blockedSymbols.join(",")})
+          </span>
+        ) : (
+          <span
+            className="hidden sm:inline-flex items-center gap-1 rounded-md border border-emerald-900/60 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-400"
+            title="Aucun embargo macro en cours"
+          >
+            <ShieldCheck className="h-3 w-3" /> MACRO LIBRE
+          </span>
+        )}
       </div>
+
 
       {/* Commandes de sécurité */}
       <div className="flex items-center gap-2">

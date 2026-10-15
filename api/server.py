@@ -322,6 +322,14 @@ def _build_ws_snapshot() -> dict:
                 "rawFeatureImportances": raw_imp,
             }
 
+        # Macro Embargo Summary
+        macro_data = None
+        if hasattr(_engine, 'news_filter') and _engine.news_filter:
+            try:
+                macro_data = _engine.news_filter.get_embargo_summary(_engine.symbols)
+            except Exception:
+                pass
+
     return {
         "type":       "snapshot",
         "timestamp":  datetime.datetime.now().isoformat(),
@@ -330,10 +338,12 @@ def _build_ws_snapshot() -> dict:
         "signals":    signals_data,
         "kelly":      kelly_data,
         "ml":         ml_data,
+        "macro":      macro_data,
         "logs":       _memory_handler.get_logs()[:20],  # 20 derniers logs seulement
         "killSwitch": _engine.kill_switch.is_triggered if _engine else False,
         "isPaused":   _engine.state_manager.is_paused if _engine else False,
     }
+
 
 
 @app.on_event("startup")
@@ -553,50 +563,91 @@ async def get_market_depth(symbol: str = "EURUSD"):
         raise HTTPException(status_code=503, detail=f"Terminal MT5 indisponible pour {symbol}")
 
 
+@app.get("/macro/news")
+@app.get("/news-filter")
+def get_macro_news_filter():
+    """
+    Retourne les détails complets du filtre macro-économique ForexFactory
+    avec statuts d'embargo, prochaines annonces et symboles bloqués.
+    """
+    symbols = _engine.symbols if _engine else ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+    if _engine and hasattr(_engine, "news_filter") and _engine.news_filter:
+        summary = _engine.news_filter.get_embargo_summary(symbols)
+        events = _engine.news_filter.get_detailed_events(symbols)
+        return {
+            "summary": summary,
+            "events": events,
+            "symbols": symbols,
+            "filterActive": True
+        }
+    return {
+        "summary": {
+            "isAnyEmbargoActive": False,
+            "activeEventsCount": 0,
+            "activeEvents": [],
+            "blockedSymbols": [],
+            "nextEvent": None,
+            "totalHighImpactLoaded": 0,
+            "pauseBeforeMinutes": 30,
+            "pauseAfterMinutes": 30,
+            "lastFetchUtc": None,
+            "serverTimeUtc": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        },
+        "events": [],
+        "symbols": symbols,
+        "filterActive": False
+    }
+
+
 @app.get("/news-events")
 def get_news_events():
-    import urllib.request
-    import xml.etree.ElementTree as ET
-    import random
-    import datetime
-    
-    events = []
-    try:
-        # Investing.com Forex News RSS
-        url = "https://www.investing.com/rss/news_285.rss"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=5) as response:
-            xml_data = response.read()
-            root = ET.fromstring(xml_data)
-            
-            items = root.findall('.//item')[:5]
-            for i, item in enumerate(items):
-                title = item.find('title').text
-                # Génération d'un sentiment artificiel basé sur la news pour la démo
-                sentiment = random.uniform(-0.9, 0.9)
-                severity = "CRITICAL" if abs(sentiment) > 0.7 else ("WARNING" if abs(sentiment) > 0.4 else "NORMAL")
+    """
+    Fournit la liste des actualités macro-économiques majeures.
+    Privilégie les vraies annonces High Impact du NewsFilter officiel.
+    """
+    symbols = _engine.symbols if _engine else ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+    if _engine and hasattr(_engine, "news_filter") and _engine.news_filter and _engine.news_filter.news_events:
+        try:
+            detailed = _engine.news_filter.get_detailed_events(symbols)
+            events = []
+            for item in detailed:
+                is_embargo = item.get("isInEmbargo", False)
+                status = item.get("status", "UPCOMING")
+                severity = "CRITICAL" if is_embargo else ("WARNING" if status == "UPCOMING" and item.get("timeUntilMinutes", 999) < 120 else "NORMAL")
                 
+                action = (
+                    f"🚨 EMBARGO ACTIF ({', '.join(item.get('affectedSymbols', []))})"
+                    if is_embargo else
+                    (f"⏳ Dans {item.get('timeUntilMinutes', 0):.0f} min" if status == "UPCOMING" else "✅ Passée")
+                )
+
                 events.append({
-                    "id": f"news-{i}",
-                    "time": datetime.datetime.now().strftime("%H:%M:%S"),
-                    "headline": title,
-                    "sentimentScore": round(sentiment, 2),
-                    "actionTaken": f"Protection {severity} évaluée",
-                    "severity": severity
+                    "id": item.get("id"),
+                    "time": item.get("date", ""),
+                    "headline": f"[{item.get('country')}] {item.get('title')}",
+                    "sentimentScore": -0.8 if is_embargo else (0.2 if status == "PASSED" else 0.0),
+                    "actionTaken": action,
+                    "severity": severity,
+                    "country": item.get("country"),
+                    "isInEmbargo": is_embargo,
+                    "status": status,
+                    "affectedSymbols": item.get("affectedSymbols", []),
+                    "timestampUtc": item.get("timestampUtc")
                 })
-    except Exception as e:
-        logging.error(f"[API] Erreur RSS News: {e}")
-        # Fallback local
-        events = [{
-            "id": "news-fallback",
-            "time": datetime.datetime.now().strftime("%H:%M:%S"),
-            "headline": "Marché Calme: Aucune donnée RSS disponible.",
-            "sentimentScore": 0.0,
-            "actionTaken": "Aucune action",
-            "severity": "NORMAL"
-        }]
-        
-    return events
+            return events
+        except Exception as e:
+            logging.error(f"[API] Erreur formatage NewsFilter events: {e}")
+
+    # Fallback si le NewsFilter n'a pas encore fini son premier fetch
+    return [{
+        "id": "news-loading",
+        "time": datetime.datetime.now().strftime("%H:%M:%S"),
+        "headline": "Synchronisation du calendrier économique ForexFactory...",
+        "sentimentScore": 0.0,
+        "actionTaken": "En attente des données",
+        "severity": "NORMAL"
+    }]
+
 
 
 @app.get("/positions")

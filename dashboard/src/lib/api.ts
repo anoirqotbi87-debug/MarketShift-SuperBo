@@ -337,6 +337,11 @@ export async function fetchNewsEvents(): Promise<NewsEvent[]> {
   return Array.isArray(data) ? data : [];
 }
 
+export async function fetchMacroNews(): Promise<import("@/types/trading").MacroNewsResponse | null> {
+  return request<import("@/types/trading").MacroNewsResponse>("/macro/news");
+}
+
+
 export async function fetchMlStatus(): Promise<MlStatus | null> {
   return request<MlStatus>("/ml/status");
 }
