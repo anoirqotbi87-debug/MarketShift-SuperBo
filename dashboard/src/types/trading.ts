@@ -91,7 +91,7 @@ export interface MlStats {
   accuracy: number;
   sampleCount: number;
   lastTrained: string;
-  featureImportances: Array<{ feature: string; importance: number }>;
+  featureImportances?: Array<{ feature: string; importance: number }> | Record<string, number>;
 }
 
 export type LogLevel = "INFO" | "WARNING" | "ERROR" | "DEBUG";
@@ -339,7 +339,7 @@ export interface MlStatus {
   sampleCount: number;
   lastTrained: string;
   confidenceThreshold: number;
-  featureImportances: Array<{ feature: string; importance: number }>;
+  featureImportances?: Array<{ feature: string; importance: number }> | Record<string, number>;
   retrainIntervalHours: number;
 }
 

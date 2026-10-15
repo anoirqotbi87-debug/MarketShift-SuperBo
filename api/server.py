@@ -309,13 +309,18 @@ def _build_ws_snapshot() -> dict:
     # ML Stats
     ml_data = {}
     if _engine:
-        ml_data = {
-            "trained": _engine.ml_trainer.is_trained,
-            "accuracy": round(_engine.ml_trainer.accuracy, 3),
-            "sampleCount": _engine.ml_trainer.sample_count,
-            "lastTrained": _engine.ml_trainer.last_trained,
-            "featureImportances": _engine.ml_trainer.get_feature_importances()
-        }
+            raw_imp = _engine.ml_trainer.get_feature_importances() or {}
+            ml_data = {
+                "trained": _engine.ml_trainer.is_trained,
+                "accuracy": round(_engine.ml_trainer.accuracy, 3),
+                "sampleCount": _engine.ml_trainer.sample_count,
+                "lastTrained": _engine.ml_trainer.last_trained,
+                "featureImportances": [
+                    {"feature": str(k), "importance": round(float(v), 4)}
+                    for k, v in raw_imp.items()
+                ],
+                "rawFeatureImportances": raw_imp,
+            }
 
     return {
         "type":       "snapshot",
@@ -779,13 +784,20 @@ def get_ml_status():
     trainer = _engine.ml_trainer
     predictor = _engine.ml_predictor
 
+    raw_importances = trainer.get_feature_importances() or {}
+    importances_list = [
+        {"feature": str(k), "importance": round(float(v), 4)}
+        for k, v in raw_importances.items()
+    ]
+
     return {
         "trained":              trainer.is_trained,
         "accuracy":             round(trainer.accuracy, 3),
         "sampleCount":          trainer.sample_count,
         "lastTrained":          trainer.last_trained,
         "confidenceThreshold":  predictor.confidence_threshold,
-        "featureImportances":   trainer.get_feature_importances(),
+        "featureImportances":   importances_list,
+        "rawFeatureImportances": raw_importances,
         "retrainIntervalHours": trainer.RETRAIN_INTERVAL_HOURS,
     }
 

@@ -49,6 +49,11 @@ export default function MlEngineView() {
   const [retraining, setRetraining] = useState(false);
   const [retrainMsg, setRetrainMsg] = useState<string | null>(null);
   const [predicting, setPredicting] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const loadLatency = useCallback(async () => {
     const l = await fetchMlLatency();
@@ -106,7 +111,7 @@ export default function MlEngineView() {
 
   const accPct = ((status?.accuracy ?? 0) * 100).toFixed(1);
   const threshPct = ((status?.confidenceThreshold ?? 0.58) * 100).toFixed(0);
-  const features = status?.featureImportances?.slice(0, 8) ?? mockFeatures();
+  const features = normalizeFeatures(status?.featureImportances).slice(0, 8);
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -212,23 +217,27 @@ export default function MlEngineView() {
             </span>
           </div>
           <div className="h-44 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={latencyHistory} margin={{ top: 5, right: 0, left: -24, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="mlLat" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#818cf8" stopOpacity={0.35} />
-                    <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f1f23" vertical={false} />
-                <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} minTickGap={28} />
-                <YAxis stroke="#818cf8" fontSize={9} tickLine={false} domain={["dataMin - 2", "dataMax + 4"]} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "12px" }}
-                />
-                <Area type="monotone" dataKey="latencyMs" name="Latence (ms)" stroke="#818cf8" strokeWidth={2} fillOpacity={1} fill="url(#mlLat)" isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+            {mounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={latencyHistory} margin={{ top: 5, right: 0, left: -24, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="mlLat" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#818cf8" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#818cf8" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f23" vertical={false} />
+                  <XAxis dataKey="time" stroke="#52525b" fontSize={9} tickLine={false} minTickGap={28} />
+                  <YAxis stroke="#818cf8" fontSize={9} tickLine={false} domain={["dataMin - 2", "dataMax + 4"]} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "12px" }}
+                  />
+                  <Area type="monotone" dataKey="latencyMs" name="Latence (ms)" stroke="#818cf8" strokeWidth={2} fillOpacity={1} fill="url(#mlLat)" isAnimationActive={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center font-mono text-[11px] text-zinc-600">Chargement…</div>
+            )}
           </div>
           {latency && (
             <div className="mt-2 flex gap-3 font-mono text-[10px] text-zinc-500">
@@ -247,22 +256,26 @@ export default function MlEngineView() {
             </h3>
           </div>
           <div className="h-52 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={features} layout="vertical" margin={{ top: 0, right: 12, left: 30, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f1f23" horizontal={false} />
-                <XAxis type="number" stroke="#52525b" fontSize={9} tickLine={false} unit="%" />
-                <YAxis type="category" dataKey="feature" stroke="#71717a" fontSize={9} tickLine={false} width={90} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "11px" }}
-                  formatter={(v) => [`${Math.round(Number(v) * 1000) / 10}%`, "Importance"]}
-                />
-                <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
-                  {features.map((_, i) => (
-                    <Cell key={i} fill={i < 3 ? "#fbbf24" : "#8b5cf6"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {mounted ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={features} layout="vertical" margin={{ top: 0, right: 12, left: 30, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f23" horizontal={false} />
+                  <XAxis type="number" stroke="#52525b" fontSize={9} tickLine={false} unit="%" />
+                  <YAxis type="category" dataKey="feature" stroke="#71717a" fontSize={9} tickLine={false} width={90} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "11px" }}
+                    formatter={(v) => [`${Math.round(Number(v) * 1000) / 10}%`, "Importance"]}
+                  />
+                  <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
+                    {features.map((f, i) => (
+                      <Cell key={`${f.feature}-${i}`} fill={i < 3 ? "#fbbf24" : "#8b5cf6"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center font-mono text-[11px] text-zinc-600">Chargement…</div>
+            )}
           </div>
         </div>
       </div>
@@ -323,6 +336,25 @@ function PredictionCard({ prediction }: { prediction: PredictResponse }) {
       </div>
     </div>
   );
+}
+
+function normalizeFeatures(raw: unknown): Array<{ feature: string; importance: number }> {
+  if (!raw) return mockFeatures();
+  if (Array.isArray(raw)) {
+    return raw.map((item) => ({
+      feature: typeof item === "object" && item !== null && "feature" in item ? String(item.feature) : String(item),
+      importance: typeof item === "object" && item !== null && "importance" in item ? Number(item.importance) || 0 : 0,
+    }));
+  }
+  if (typeof raw === "object") {
+    const entries = Object.entries(raw as Record<string, unknown>);
+    if (entries.length === 0) return mockFeatures();
+    return entries.map(([feature, val]) => ({
+      feature: String(feature),
+      importance: Number(val) || 0,
+    }));
+  }
+  return mockFeatures();
 }
 
 function mockFeatures() {
