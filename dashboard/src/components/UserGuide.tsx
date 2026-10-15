@@ -13,7 +13,9 @@ import {
   GaugeCircle,
   HelpCircle,
   Landmark,
+  Layers,
   LineChart,
+  Newspaper,
   Radio,
   Search,
   Server,
@@ -56,7 +58,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               Mode Opératoire du SuperBot
             </h1>
             <p className="mt-1 text-xs text-zinc-400 sm:text-sm">
-              Guide complet d&apos;exploitation, architecture en temps réel, gestion du risque et utilisation de chaque module.
+              Guide complet d&apos;exploitation, architecture Multi-Timeframe (MTF), filtre macro ForexFactory et gestion du risque.
             </p>
           </div>
 
@@ -104,7 +106,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               <span className="font-mono text-xs font-bold text-cyan-400">ÉTAPE 1</span>
               <h3 className="mt-2 text-sm font-bold text-zinc-100">Ouvrir MetaTrader 5</h3>
               <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
-                Lancez votre terminal XM ou Exness (<code className="text-zinc-300">terminal64.exe</code>). Le compte de trading doit être connecté avec le statut &quot;Trading algorithmique autorisé&quot;.
+                Lancez votre terminal XM ou Exness (<code className="text-zinc-300">terminal64.exe</code>). Le compte de trading doit être connecté avec le statut &quot;Trading algorithmique autorisé&quot; (icône verte).
               </p>
             </div>
 
@@ -112,15 +114,15 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               <span className="font-mono text-xs font-bold text-violet-400">ÉTAPE 2</span>
               <h3 className="mt-2 text-sm font-bold text-zinc-100">Démarrer le Bot</h3>
               <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
-                Double-cliquez sur <code className="text-zinc-300">lancer_app.bat</code> ou exécutez <code className="text-zinc-300">.venv\Scripts\python.exe main.py</code>. Le serveur d&apos;API démarre sur le port 8000.
+                Double-cliquez sur <code className="text-zinc-300">lancer_app.bat</code> ou lancez <code className="text-zinc-300">.venv\Scripts\python.exe main.py</code>. L&apos;API FastAPI démarre sur le port 8000 et initialise le moteur dual-timeframe.
               </p>
             </div>
 
             <div className="card p-5 border-l-4 border-l-emerald-500">
               <span className="font-mono text-xs font-bold text-emerald-400">ÉTAPE 3</span>
-              <h3 className="mt-2 text-sm font-bold text-zinc-100">Suivre sur le Dashboard</h3>
+              <h3 className="mt-2 text-sm font-bold text-zinc-100">Contrôler le Dashboard</h3>
               <p className="mt-1 text-xs text-zinc-400 leading-relaxed">
-                Accédez à <code className="text-zinc-300">http://localhost:3000</code> ou à votre URL Vercel. Le point vert &quot;CONNECTÉ&quot; confirme que les flux sont synchronisés.
+                Accédez à <code className="text-zinc-300">http://localhost:3000</code> ou à votre URL Vercel. Vérifiez les indicateurs dans le Header : le voyant &quot;CONNECTÉ&quot; et le badge de statut &quot;MACRO LIBRE&quot;.
               </p>
             </div>
           </div>
@@ -138,19 +140,23 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
                 <ul className="mt-3 space-y-2 text-xs text-zinc-400">
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                    <span><b>Trading Loop Asyncio :</b> Analyse 5 symboles (EURUSD, GBPUSD, USDJPY, GOLD, BTCUSD) toutes les 2 secondes.</span>
+                    <span><b>Trading Loop Asyncio (2s) :</b> Analyse 5 symboles (EURUSD, GBPUSD, USDJPY, GOLD, BTCUSD) à haute fréquence.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                    <span><b>Consensus Institutionnel :</b> Fusionne les stratégies SMC (Order Blocks, Fair Value Gaps) et AMD (Accumulation, Manipulation, Distribution).</span>
+                    <span><b>Architecture Multi-Timeframe (MTF) :</b> Synchronise les bougies primaires (LTF) avec la tendance institutionnelle supérieure (HTF H1/H4).</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                    <span><b>Filtre Embargo ForexFactory :</b> Gèle automatiquement le trading ±30 minutes autour des annonces High Impact (rouges).</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                    <span><b>Consensus Institutionnel SMC + AMD :</b> Détecte Order Blocks, Fair Value Gaps et cycles Accumulation/Manipulation/Distribution.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
                     <span><b>Filtre IA (VETO Machine Learning) :</b> XGBoost + LSTM valident obligatoirement la direction avant tout passage d&apos;ordre.</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                    <span><b>Stop Loss Inviolable (Règle M-01) :</b> Tout ordre est refusé si le Stop Loss n&apos;est pas strictement positif (&gt; 0).</span>
                   </li>
                 </ul>
               </div>
@@ -162,19 +168,19 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
                 <ul className="mt-3 space-y-2 text-xs text-zinc-400">
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
-                    <span><b>Observabilité Zero-Latency :</b> Reçoit chaque tick, position et signal par WebSocket bidirectionnel.</span>
+                    <span><b>Observabilité Zero-Latency :</b> Reçoit chaque tick, position, log et signal par WebSocket bidirectionnel.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
-                    <span><b>Sécurité par Clé d&apos;API :</b> Authentifie chaque requête avec l&apos;en-tête <code>X-API-Key</code> et le paramètre WS <code>api_key</code>.</span>
+                    <span><b>Pilotage Hot-Reload des Profils :</b> Basculez instantanément entre Scalping M5, Day M15, MTF H1+M5 et Swing H1 avec sauvegarde atomique dans le fichier <code>.env</code>.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                    <span><b>Suivi Macroéconomique en Direct :</b> Calendrier complet des annonces économiques et statut d&apos;embargo par paire.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
                     <span><b>Télécommande d&apos;Urgence :</b> Kill Switch matériel, mise en pause et clôture totale des positions en un clic.</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-400" />
-                    <span><b>Résilience Complète :</b> Chaque sous-vue dispose de fallbacks automatiques et d&apos;un Error Boundary isolant.</span>
                   </li>
                 </ul>
               </div>
@@ -191,25 +197,27 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               id: "live" as DashboardView,
               title: "1. Live Monitoring (Surveillance Temps Réel)",
               icon: Activity,
-              desc: "Centre névralgique du bot avec KPI financiers, courbe d'équité et journal de télémétrie.",
+              desc: "Centre névralgique du bot avec KPI financiers, courbe d'équité, statut macro et journal de télémétrie.",
               details: [
                 "KpiGrid : Solde, Équité, Marge Libre, P&L Journalier, Ratio Win Rate et Expectancy.",
                 "Courbe d'équité interactive : Vues 1 Jour (1D), 1 Mois (1M) et comparaison avec l'actif de référence.",
                 "Télémétrie IA : Affiche les calculs du consensus, les détections SMC/AMD et les décisions de l'IA (accord ou Veto).",
                 "Positions Ouvertes : Liste chaque position avec SL, TP, P&L flottant en USD et bouton de clôture rapide d'urgence.",
-                "Bouton d'Urgence (Header) : Déclenche le Kill Switch immédiat (fermeture de tous les ordres et arrêt des prises de position).",
+                "Header Status : Badge en direct 'MACRO LIBRE' ou 'EMBARGO NEWS [PAIRE]' indiquant l'état du filtre macroéconomique.",
+                "Bouton d'Urgence : Déclenche le Kill Switch immédiat (fermeture de tous les ordres et verrouillage des entrées).",
               ],
             },
             {
               id: "analytics" as DashboardView,
-              title: "2. Analytics (Analytique Avancée & Marché)",
+              title: "2. Analytics & Calendrier Macro (Analytique Avancée)",
               icon: LineChart,
-              desc: "Fournit une radiographie complète de l'environnement de trading en 4 sous-onglets.",
+              desc: "Fournit une radiographie complète du marché et la surveillance des annonces économiques ForexFactory.",
               details: [
-                "Sous-vue Marché (24h) : Prix actuels, variation en % sur 24h et mini-courbes (sparklines) pour les 5 symboles.",
+                "Sous-vue Marché (24h) : Prix actuels, variation en % sur 24h et sparklines pour les 5 symboles.",
                 "Carnet d'Ordres (Depth) : Profondeur de marché DOM (Bid/Ask) visualisée par paliers de volume.",
-                "Actualités & Embargo News : Surveillance RSS en temps réel des annonces macro-économiques (13 annonces High Impact surveillées). Embargo automatique de ±30 minutes pendant les annonces.",
-                "Infra Monitor : Temps de réponse ping MT5, débit requêtes/seconde et utilisation CPU/RAM du système.",
+                "Module Calendrier Macro & Embargo : Interroge le calendrier ForexFactory en temps réel et applique un embargo automatique de ±30 minutes autour des annonces High Impact.",
+                "Liste des Actualités Filtrées : Affiche les événements de la semaine avec devises concernées, date/heure précise et statut d'embargo direct.",
+                "Infra Monitor : Temps de réponse ping MT5 (en ms), débit requêtes/seconde et utilisation CPU/RAM du système.",
                 "Répartition des Positions : Graphique circulaire de concentration des lots par symbole.",
               ],
             },
@@ -252,14 +260,15 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "config" as DashboardView,
-              title: "6. Stratégies & Risque (Paramètres Dynamiques)",
+              title: "6. Stratégies, Profils & MTF (Configuration Dynamique)",
               icon: Settings2,
-              desc: "Ajustez le comportement du bot en temps réel sans devoir le redémarrer.",
+              desc: "Sélectionnez vos profils de trading, ajustez les timeframes MTF et modifiez les paramètres sans redémarrer le bot.",
               details: [
-                "Multiplicateurs Stop Loss / Take Profit : Réglez vos ratios ATR dynamiques.",
-                "Trailing Stop Actif : Activez la poursuite automatique du profit par palier de 2 secondes.",
-                "Calculatrice Kelly Sizer : Calcule la taille optimale de lot pour votre capital selon la formule de Kelly fractionnaire (25%).",
-                "Alertes de Prix : Configurez des alertes sonores ou visuelles lorsque le prix d'un symbole dépasse un seuil.",
+                "Matrice des 4 Profils : Basculez en un clic entre Scalping M5, Day Trading M15, Institutional MTF (H1+M5 recommandé) et Swing Trading H1.",
+                "Curseurs Timeframe : Réglez le Timeframe Primaire (LTF de M1 à H4) et le Timeframe Supérieur (HTF de M15 à D1).",
+                "Toggle MTF Confluence : Active ou désactive le filtre de biais macroéconomique H1 sur les entrées LTF.",
+                "Multiplicateurs SL/TP & Trailing : Ajustez dynamiquement vos multiplicateurs ATR et le suivi du profit.",
+                "Sauvegarde Atomique .env : Les modifications sont immédiatement injectées dans le moteur en mémoire et écrites de façon atomique dans le fichier .env.",
               ],
             },
             {
@@ -293,7 +302,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               desc: "Console de développement affichant jusqu'à 200 logs avec recherche instantanée.",
               details: [
                 "Filtres par niveau : ALL, INFO (vert), WARNING (jaune), ERROR (rouge), DEBUG (gris).",
-                "Recherche textuelle : Tapez un symbole ('BTCUSD'), un type d'ordre ou une décision pour filtrer les lignes.",
+                "Recherche textuelle : Tapez un symbole ('BTCUSD'), un module ('NewsFilter', 'Engine') ou une décision pour filtrer les lignes.",
                 "Fusion WebSocket : Reçoit les nouveaux événements en direct dès qu'une action est exécutée par le bot.",
               ],
             },
@@ -360,6 +369,26 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               </p>
             </div>
 
+            <div className="card p-5 border-l-4 border-l-rose-600">
+              <div className="flex items-center gap-2">
+                <Newspaper className="h-5 w-5 text-rose-400" />
+                <h3 className="text-sm font-bold text-zinc-100">Règle M-02 : Embargo Macro ForexFactory (±30m)</h3>
+              </div>
+              <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                Les annonces économiques majeures (CPI, NFP, taux des banques centrales) provoquent des écarts de spread et du slippage dévastateurs. Le bot suspend automatiquement les entrées <b>30 minutes avant et 30 minutes après</b> chaque annonce High Impact sur les devises concernées.
+              </p>
+            </div>
+
+            <div className="card p-5 border-l-4 border-l-blue-500">
+              <div className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-blue-400" />
+                <h3 className="text-sm font-bold text-zinc-100">Règle M-03 : Confluence Multi-Timeframe (HTF Bias)</h3>
+              </div>
+              <p className="mt-2 text-xs text-zinc-400 leading-relaxed">
+                En mode Institutional MTF, les signaux d&apos;entrée M5 sont systématiquement confrontés à la tendance H1 (EMA 20/50 et structure institutionnelle). Un signal d&apos;achat M5 est rejeté sans appel si le biais macro H1 est baissier, éliminant plus de 65% des faux signaux.
+              </p>
+            </div>
+
             <div className="card p-5 border-l-4 border-l-cyan-500">
               <div className="flex items-center gap-2">
                 <BrainCircuit className="h-5 w-5 text-cyan-400" />
@@ -388,6 +417,18 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
         <div className="space-y-4">
           {[
             {
+              q: "Comment fonctionnent les 4 profils de trading et le mode MTF ?",
+              r: "Dans l'onglet 'Stratégies & Risque', vous pouvez choisir entre Scalping M5 (haute vélocité), Day Trading M15 (équilibre standard), Institutional MTF (recommandé : analyse H1 pour la tendance + entrée chirurgicale M5) et Swing Trading H1 (grands mouvements). En un clic, le profil met à jour la mémoire du bot et s'enregistre dans votre fichier .env.",
+            },
+            {
+              q: "Pourquoi le statut indique-t-il 'EMBARGO NEWS' et bloque-t-il mes trades ?",
+              r: "C'est une protection vitale contre les chocs de volatilité : si une annonce High Impact (rouge) figure sur ForexFactory, le bot bloque toute prise de position sur les devises concernées 30 minutes avant et après l'événement. Vous pouvez consulter les détails de l'annonce et l'heure de levée dans l'onglet 'Analytics' > sous-onglet 'Actualités & Embargo'.",
+            },
+            {
+              q: "Mes modifications de paramètres dans le Dashboard sont-elles conservées au redémarrage ?",
+              r: "Oui ! Toute modification validée via 'Sauvegarder les Paramètres' met à jour le moteur en direct (hot-reload en RAM) et est écrite de manière atomique dans le fichier .env sur le serveur grâce au module EnvWriter.",
+            },
+            {
               q: "Pourquoi le statut reste-t-il 'DÉCONNECTÉ' sur le Dashboard ?",
               r: "Vérifiez que votre backend Python est bien en cours d'exécution ('main.py' lancé sur le port 8000). Vérifiez également dans la boîte de connexion (icône en haut à droite) que votre URL est bien 'http://localhost:8000' et que votre 'API_SECRET_KEY' correspond à celle inscrite dans votre fichier .env.",
             },
@@ -397,15 +438,11 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               q: "Le bot tourne mais ne prend aucun trade, pourquoi ?",
-              r: "C'est normal et sain : le bot n'est pas un robot de scalping agressif. Il attend que 3 conditions simultanées soient réunies : 1) Signal institutionnel SMC/AMD validé, 2) Accord du modèle d'Intelligence Artificielle (pas de VETO ML), et 3) Absence d'embargo sur les annonces économiques majeures (±30 minutes d'une annonce rouge).",
+              r: "C'est normal et sain : le bot attend la triple confluence : 1) Signal institutionnel SMC/AMD validé, 2) Accord du modèle IA (pas de VETO ML), 3) Biais HTF aligné si le mode MTF est actif, et 4) Absence d'embargo économique sur la paire.",
             },
             {
               q: "Que faire en cas d'urgence absolue sur le marché ?",
               r: "Cliquez sur le bouton rouge 'KILL SWITCH' situé tout en haut à droite du Dashboard. Le bot ferme immédiatement toutes les positions ouvertes chez le courtier et verrouille les nouvelles entrées.",
-            },
-            {
-              q: "Comment changer de compte ou de courtier (ex: XM vers Exness) ?",
-              r: "Rendez-vous dans l'onglet 'Comptes Broker', cliquez sur le compte souhaité puis sur 'Activer'. Le routeur de courtier bascule instantanément la prise d'ordres vers le nouveau terminal sélectionné.",
             },
           ].map((item, i) => (
             <div key={i} className="card p-4">
