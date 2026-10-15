@@ -1,1 +1,23 @@
-{"accuracy": 0.613013013013013, "sample_count": 24971, "last_trained": "2026-09-21 17:35:53"}
+{
+  "accuracy": 0.6304304304304305,
+  "sample_count": 24971,
+  "last_trained": "2026-10-15 17:08:28",
+  "confusion_matrix": [
+    [
+      2710,
+      853
+    ],
+    [
+      993,
+      439
+    ]
+  ],
+  "min_accuracy_threshold": 0.55,
+  "symbols": [
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "GOLD",
+    "BTCUSD"
+  ]
+}
