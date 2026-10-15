@@ -28,6 +28,8 @@ const DEFAULT_SETTINGS: RuntimeSettings = {
   primary_timeframe: "M5",
   mtf_enabled: true,
   htf_timeframe: "H1",
+  active_symbols: ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
+  available_symbols: ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
 };
 
 interface ProfilePreset {
@@ -177,6 +179,8 @@ export default function ConfigPanel() {
           primary_timeframe: s.primary_timeframe || prev.primary_timeframe || "M5",
           mtf_enabled: s.mtf_enabled !== undefined ? s.mtf_enabled : true,
           htf_timeframe: s.htf_timeframe || prev.htf_timeframe || "H1",
+          active_symbols: s.active_symbols || prev.active_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
+          available_symbols: s.available_symbols || prev.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"],
         }));
       }
       if (k) setKelly(k);
@@ -218,6 +222,26 @@ export default function ConfigPanel() {
     }));
   };
 
+  const toggleSymbolConfig = (sym: string) => {
+    setSettings((prev) => {
+      const current = prev.active_symbols || [];
+      const updated = current.includes(sym)
+        ? current.filter((s) => s !== sym)
+        : [...current, sym];
+      return {
+        ...prev,
+        active_symbols: updated,
+      };
+    });
+  };
+
+  const setAllSymbols = (enable: boolean) => {
+    setSettings((prev) => ({
+      ...prev,
+      active_symbols: enable ? [...(prev.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"])] : [],
+    }));
+  };
+
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -232,6 +256,7 @@ export default function ConfigPanel() {
       primary_timeframe: settings.primary_timeframe,
       mtf_enabled: settings.mtf_enabled,
       htf_timeframe: settings.htf_timeframe,
+      active_symbols: settings.active_symbols,
     });
     setSaving(false);
     if (res) {
@@ -403,6 +428,95 @@ export default function ConfigPanel() {
               </p>
             </div>
           </div>
+        </section>
+
+        {/* ── 3. SÉLECTION DES SYMBOLES ACTIFS (UNIVERS DE TRADING) ── */}
+        <section className="card p-5">
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-800/80 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400 font-mono text-xs font-bold">
+                  3
+                </span>
+                <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wide">
+                  Univers de Trading &amp; Symboles Actifs
+                </h2>
+              </div>
+              <p className="text-xs text-zinc-400 mt-1">
+                Activez ou mettez en pause les prises de positions individuelles par actif en un clic.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1">
+                <span className="text-cyan-400 font-bold">{(settings.active_symbols || []).length}</span> / {(settings.available_symbols || []).length} actifs
+              </span>
+              <button
+                type="button"
+                onClick={() => setAllSymbols(true)}
+                className="text-[10px] font-mono font-semibold px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition"
+              >
+                Tout Activer
+              </button>
+              <button
+                type="button"
+                onClick={() => setAllSymbols(false)}
+                className="text-[10px] font-mono font-semibold px-2 py-1 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 transition"
+              >
+                Tout Pause
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {(settings.available_symbols || ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]).map((sym) => {
+              const isAct = (settings.active_symbols || []).includes(sym);
+              const category = sym.includes("BTC") ? "Crypto" : sym.includes("GOLD") || sym.includes("XAU") ? "Matière Première" : "Forex Majeur";
+              return (
+                <div
+                  key={sym}
+                  onClick={() => toggleSymbolConfig(sym)}
+                  className={`group relative flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition select-none ${
+                    isAct
+                      ? "bg-cyan-500/5 border-cyan-500/40 hover:border-cyan-400 shadow-sm shadow-cyan-500/10"
+                      : "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 opacity-60 hover:opacity-80"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-mono text-xs font-bold text-zinc-100">{sym}</span>
+                      <p className="text-[10px] text-zinc-500">{category}</p>
+                    </div>
+                    {/* Toggle switch visual */}
+                    <div
+                      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
+                        isAct ? "bg-cyan-500" : "bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+                          isAct ? "translate-x-4" : "translate-x-1"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-zinc-800/60 pt-2">
+                    <span className={isAct ? "text-cyan-400 font-semibold" : "text-zinc-500"}>
+                      {isAct ? "Trading Actif" : "En Pause"}
+                    </span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                      isAct ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800 text-zinc-500"
+                    }`}>
+                      {isAct ? "ON" : "OFF"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-zinc-500 mt-3 font-mono leading-relaxed">
+            💡 <b>Sécurité garantie</b> : Désactiver un actif met en pause la détection et l&apos;ouverture de nouveaux ordres sur celui-ci. Les positions déjà ouvertes sur cet actif continuent d&apos;être protégées et clôturées normalement par le Stop Loss, le Take Profit et le Trailing Stop.
+          </p>
         </section>
 
         {/* Panneau Gestion du Risque (Kelly) */}

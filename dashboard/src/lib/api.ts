@@ -212,6 +212,24 @@ export async function fetchSymbols(): Promise<SymbolOverview[]> {
   return Array.isArray(data) ? data : [];
 }
 
+export interface ToggleSymbolResponse {
+  success: boolean;
+  symbol: string;
+  enabled: boolean;
+  activeSymbols: string[];
+  availableSymbols: string[];
+}
+
+export async function toggleSymbol(
+  symbol: string,
+  enabled: boolean,
+): Promise<ToggleSymbolResponse | null> {
+  return request<ToggleSymbolResponse>("/symbols/toggle", {
+    method: "POST",
+    body: JSON.stringify({ symbol, enabled }),
+  });
+}
+
 export async function fetchLogs(): Promise<import("@/types/trading").EngineLog[]> {
   const data = await request<import("@/types/trading").EngineLog[]>("/logs");
   return Array.isArray(data) ? data : [];

@@ -265,6 +265,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
               desc: "Sélectionnez vos profils de trading, ajustez les timeframes MTF et modifiez les paramètres sans redémarrer le bot.",
               details: [
                 "Matrice des 4 Profils : Basculez en un clic entre Scalping M5, Day Trading M15, Institutional MTF (H1+M5 recommandé) et Swing Trading H1.",
+                "Sélecteurs de Symboles ON/OFF : Activez ou mettez en pause chaque actif individuellement (boutons pills dans le Header et grille dans l'onglet Stratégies).",
                 "Curseurs Timeframe : Réglez le Timeframe Primaire (LTF de M1 à H4) et le Timeframe Supérieur (HTF de M15 à D1).",
                 "Toggle MTF Confluence : Active ou désactive le filtre de biais macroéconomique H1 sur les entrées LTF.",
                 "Multiplicateurs SL/TP & Trailing : Ajustez dynamiquement vos multiplicateurs ATR et le suivi du profit.",
@@ -419,6 +420,10 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             {
               q: "Comment fonctionnent les 4 profils de trading et le mode MTF ?",
               r: "Dans l'onglet 'Stratégies & Risque', vous pouvez choisir entre Scalping M5 (haute vélocité), Day Trading M15 (équilibre standard), Institutional MTF (recommandé : analyse H1 pour la tendance + entrée chirurgicale M5) et Swing Trading H1 (grands mouvements). En un clic, le profil met à jour la mémoire du bot et s'enregistre dans votre fichier .env.",
+            },
+            {
+              q: "Comment activer ou mettre en pause un actif spécifique (ex: couper le Bitcoin ou l'Or) ?",
+              r: "Vous disposez de boutons pills réactifs directement dans le Header (en haut à côté des indicateurs système) et d'un gestionnaire complet dans l'onglet 'Stratégies & Risque'. Cliquez sur un symbole pour le basculer entre 'ON' (Trading Actif) et 'OFF' (En Pause). La mise en pause empêche l'ouverture de nouveaux trades sur ce symbole, tandis que vos positions déjà ouvertes continuent d'être gérées et clôturées en toute sécurité par leurs Stop Loss et Take Profit.",
             },
             {
               q: "Pourquoi le statut indique-t-il 'EMBARGO NEWS' et bloque-t-il mes trades ?",

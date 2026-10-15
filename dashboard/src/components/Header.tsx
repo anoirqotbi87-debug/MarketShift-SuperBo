@@ -16,7 +16,7 @@ import {
   WifiOff,
 } from "lucide-react";
 
-import { sendControlCommand } from "@/lib/api";
+import { sendControlCommand, toggleSymbol } from "@/lib/api";
 import type { WsSnapshot } from "@/types/trading";
 import EmergencyModal from "./EmergencyModal";
 import ConnectionSwitcher from "./ConnectionSwitcher";
@@ -45,6 +45,21 @@ export default function Header({
   const [showEmergency, setShowEmergency] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [togglingSym, setTogglingSym] = useState<string | null>(null);
+
+  const availableSymbols = snapshot.availableSymbols ?? ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+  const activeSymbols = snapshot.activeSymbols ?? ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"];
+
+  const handleToggleSymbol = async (sym: string, isCurrentlyActive: boolean) => {
+    setTogglingSym(sym);
+    try {
+      await toggleSymbol(sym, !isCurrentlyActive);
+    } catch {
+      // ignore
+    } finally {
+      setTogglingSym(null);
+    }
+  };
 
   const { account, killSwitch, isPaused } = snapshot;
 
@@ -110,13 +125,10 @@ export default function Header({
         </div>
       </div>
 
-      {/* Indicateurs système */}
+      {/* Indicateurs système & Sélecteurs de symboles */}
       <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-zinc-400">
         <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1">
           Broker : <span className="text-zinc-200">{brokerLabel}</span>
-        </span>
-        <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1">
-          Symboles : <span className="text-zinc-200">{symbolsCount ?? 0}</span>
         </span>
         <span className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1">
           Cycle : <span className="text-cyan-300">~0.2s</span>
@@ -146,6 +158,54 @@ export default function Header({
             <ShieldCheck className="h-3 w-3" /> MACRO LIBRE
           </span>
         )}
+
+        {/* Sélecteurs de symboles individuels ON / OFF */}
+        <div className="flex items-center gap-1 pl-1 border-l border-zinc-800/80">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold mr-0.5 hidden md:inline">
+            Symboles :
+          </span>
+          {availableSymbols.map((sym) => {
+            const isAct = activeSymbols.includes(sym);
+            const isBusy = togglingSym === sym;
+            const isBlocked = snapshot.macro?.blockedSymbols?.includes(sym);
+            return (
+              <button
+                key={sym}
+                type="button"
+                disabled={isBusy}
+                onClick={() => handleToggleSymbol(sym, isAct)}
+                title={
+                  isBlocked
+                    ? `${sym} est sous embargo macroéconomique ForexFactory`
+                    : isAct
+                    ? `Cliquer pour désactiver ${sym} (mettre en pause les nouvelles entrées)`
+                    : `Cliquer pour réactiver ${sym}`
+                }
+                className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold transition ${
+                  isAct
+                    ? isBlocked
+                      ? "border border-amber-600/50 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
+                      : "border border-cyan-500/40 bg-cyan-500/15 text-cyan-300 hover:border-cyan-400 hover:bg-cyan-500/25"
+                    : "border border-zinc-800 bg-zinc-900/60 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300 opacity-60"
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    isAct
+                      ? isBlocked
+                        ? "bg-amber-400 animate-pulse"
+                        : "bg-cyan-400"
+                      : "bg-zinc-600"
+                  }`}
+                />
+                <span>{sym}</span>
+                <span className="text-[8px] tracking-tighter opacity-80 font-extrabold">
+                  {isBlocked ? "EMB" : isAct ? "ON" : "OFF"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
 

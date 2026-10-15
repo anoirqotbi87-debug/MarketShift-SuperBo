@@ -116,28 +116,20 @@ class Engine:
         self._tf_primary: int = Config.parse_timeframe(self.primary_timeframe_str)
         self._tf_htf: int = Config.parse_timeframe(self.htf_timeframe_str)
 
-        # Multi-symbole : chaque symbole a ses propres instances de stratégies
-        self.symbols: list = Config.TRADING_SYMBOLS
+        # Multi-symbole : support des symboles disponibles et activables dynamiquement
+        self.symbols: list = [s.strip().upper() for s in Config.TRADING_SYMBOLS]
+        self.available_symbols: list = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
+        for s in self.symbols:
+            if s not in self.available_symbols:
+                self.available_symbols.append(s)
+        self.enabled_symbols: set = set(self.symbols)
 
         self._symbol_strategies: Dict[str, list] = {}
         self._symbol_aggregators: Dict[str, SignalAggregator] = {}
         self.latest_signals: Dict[str, Optional[Signal]] = {}
 
-        for symbol in self.symbols:
-            strategies = [
-                SMCStrategy(
-                    name=f"SMC_{symbol}", weight=2.0,
-                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
-                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
-                ),
-                AMDStrategy(
-                    name=f"AMD_{symbol}", weight=2.5,
-                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
-                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
-                )
-            ]
-            self._symbol_strategies[symbol] = strategies
-            self._symbol_aggregators[symbol] = SignalAggregator(strategies)
+        for symbol in self.available_symbols:
+            self._init_strategies_for_symbol(symbol)
 
         # ML — Entraîneur + Prédicateur
         self.ml_trainer   = MLTrainer()
@@ -222,6 +214,55 @@ class Engine:
             f"[Engine] 🎛️ Mode mis à jour: {self.trading_mode} "
             f"| Primaire: {self.primary_timeframe_str} | MTF: {self.mtf_enabled} (HTF: {self.htf_timeframe_str})"
         )
+
+    def _init_strategies_for_symbol(self, symbol: str):
+        """Initialise les stratégies SMC et AMD pour un symbole donné si absent."""
+        if symbol not in self._symbol_strategies:
+            strategies = [
+                SMCStrategy(
+                    name=f"SMC_{symbol}", weight=2.0,
+                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
+                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
+                ),
+                AMDStrategy(
+                    name=f"AMD_{symbol}", weight=2.5,
+                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
+                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
+                )
+            ]
+            self._symbol_strategies[symbol] = strategies
+            self._symbol_aggregators[symbol] = SignalAggregator(strategies)
+
+    def toggle_symbol(self, symbol: str, enabled: bool) -> bool:
+        """Active ou désactive un symbole à chaud."""
+        sym = symbol.strip().upper()
+        if sym not in self.available_symbols:
+            self.available_symbols.append(sym)
+        self._init_strategies_for_symbol(sym)
+        if enabled:
+            self.enabled_symbols.add(sym)
+        else:
+            self.enabled_symbols.discard(sym)
+        self.symbols = [s for s in self.available_symbols if s in self.enabled_symbols]
+        logging.info(
+            f"[Engine] 🎛️ Symbole {sym} {'ACTIVÉ ✅' if enabled else 'DÉSACTIVÉ ⏸️'}. "
+            f"Symboles actifs ({len(self.symbols)}): {', '.join(self.symbols)}"
+        )
+        return sym in self.enabled_symbols
+
+    def set_enabled_symbols(self, symbols: list) -> list:
+        """Définit la liste complète des symboles actifs."""
+        cleaned = [s.strip().upper() for s in symbols if s.strip()]
+        for s in cleaned:
+            if s not in self.available_symbols:
+                self.available_symbols.append(s)
+            self._init_strategies_for_symbol(s)
+        self.enabled_symbols = set(cleaned)
+        self.symbols = [s for s in self.available_symbols if s in self.enabled_symbols]
+        logging.info(
+            f"[Engine] 🎛️ Liste des symboles actifs mise à jour ({len(self.symbols)}): {', '.join(self.symbols)}"
+        )
+        return self.symbols
 
     def _run_async_loop_thread(self):
 
@@ -349,7 +390,8 @@ class Engine:
             for symbol in self.symbols:
                 if self.kill_switch.is_triggered:
                     break
-                tasks.append(self._process_symbol_async(symbol))
+                if symbol in self.enabled_symbols:
+                    tasks.append(self._process_symbol_async(symbol))
 
             if tasks:
                 results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -118,6 +118,8 @@ export interface WsSnapshot {
   primaryTimeframe?: string;
   mtfEnabled?: boolean;
   htfTimeframe?: string;
+  activeSymbols?: string[];
+  availableSymbols?: string[];
 }
 
 
@@ -139,6 +141,7 @@ export interface KpiMetrics {
 
 export interface SymbolOverview {
   symbol: string;
+  isActive?: boolean;
   signal: SignalData;
   openPositions: number;
   unrealizedPnL: number;
@@ -179,6 +182,8 @@ export interface RuntimeSettings {
   primary_timeframe?: string;
   mtf_enabled?: boolean;
   htf_timeframe?: string;
+  active_symbols?: string[];
+  available_symbols?: string[];
 }
 
 /** Corps accepté par POST /settings (tous champs optionnels). */
@@ -193,6 +198,8 @@ export interface SettingsPatch {
   primary_timeframe?: string;
   mtf_enabled?: boolean;
   htf_timeframe?: string;
+  active_symbols?: string[];
+  available_symbols?: string[];
 }
 
 

@@ -88,6 +88,8 @@ class RuntimeSettings:
     primary_timeframe: str       = getattr(Config, "PRIMARY_TIMEFRAME", "M5")
     mtf_enabled: bool            = getattr(Config, "MTF_ENABLED", True)
     htf_timeframe: str           = getattr(Config, "HTF_TIMEFRAME", "H1")
+    active_symbols: list         = [s.strip().upper() for s in getattr(Config, "TRADING_SYMBOLS", ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"])]
+    available_symbols: list      = ["EURUSD", "GBPUSD", "USDJPY", "GOLD", "BTCUSD"]
 
 
 
@@ -352,6 +354,8 @@ def _build_ws_snapshot() -> dict:
         "primaryTimeframe": _runtime_settings.primary_timeframe,
         "mtfEnabled": _runtime_settings.mtf_enabled,
         "htfTimeframe": _runtime_settings.htf_timeframe,
+        "activeSymbols": list(_engine.symbols) if _engine and hasattr(_engine, 'symbols') else _runtime_settings.active_symbols,
+        "availableSymbols": list(_engine.available_symbols) if _engine and hasattr(_engine, 'available_symbols') else _runtime_settings.available_symbols,
     }
 
 
@@ -795,14 +799,58 @@ def get_logs():
     return _memory_handler.get_logs()
 
 
+class ToggleSymbolRequest(BaseModel):
+    symbol: str
+    enabled: bool
+
+
+@app.post("/symbols/toggle")
+def toggle_symbol_endpoint(req: ToggleSymbolRequest, api_key: str = Depends(verify_api_key)):
+    """Active ou désactive un symbole individuel à chaud avec persistance atomique."""
+    sym = req.symbol.strip().upper()
+    if _engine:
+        _engine.toggle_symbol(sym, req.enabled)
+        active = list(_engine.symbols)
+        available = list(_engine.available_symbols)
+    else:
+        active = list(_runtime_settings.active_symbols)
+        if req.enabled and sym not in active:
+            active.append(sym)
+        elif not req.enabled and sym in active:
+            active.remove(sym)
+        _runtime_settings.active_symbols = active
+        available = list(_runtime_settings.available_symbols)
+        if sym not in available:
+            available.append(sym)
+            _runtime_settings.available_symbols = available
+
+    _runtime_settings.active_symbols = active
+    try:
+        atomic_update_env({"TRADING_SYMBOLS": ",".join(active)})
+    except Exception as err:
+        logging.warning(f"[API] Erreur écriture TRADING_SYMBOLS dans .env: {err}")
+
+    logging.info(f"[API] 🎛️ Symbole {sym} {'activé' if req.enabled else 'désactivé'}. Symboles actifs: {active}")
+    return {
+        "success": True,
+        "symbol": sym,
+        "enabled": req.enabled,
+        "activeSymbols": active,
+        "availableSymbols": available
+    }
+
+
 @app.get("/symbols")
 def get_symbols():
-    """Retourne la liste des symboles actifs et leur signal courant."""
+    """Retourne la liste des symboles actifs et disponibles avec leur signal courant et statut."""
     if not _engine:
         return []
 
+    available = getattr(_engine, "available_symbols", _engine.symbols)
+    enabled = getattr(_engine, "enabled_symbols", set(_engine.symbols))
+
     result = []
-    for symbol in _engine.symbols:
+    for symbol in available:
         aggregator = _engine._symbol_aggregators.get(symbol)
         signal_info = {"direction": "WAIT", "confidence": 0, "source": "—"}
 
@@ -829,6 +877,7 @@ def get_symbols():
 
         result.append({
             "symbol":         symbol,
+            "isActive":       symbol in enabled,
             "signal":         signal_info,
             "openPositions":  len(open_positions),
             "unrealizedPnL":  round(pnl, 2),
@@ -1068,6 +1117,7 @@ class SettingsPayload(BaseModel):
     primary_timeframe: Optional[str] = None
     mtf_enabled: Optional[bool] = None
     htf_timeframe: Optional[str] = None
+    active_symbols: Optional[List[str]] = None
 
 
 class ApplySettingsPayload(BaseModel):
@@ -1222,6 +1272,12 @@ def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_
             env_updates["MAX_RISK_PER_TRADE_PCT"] = str(payload.risk_percent)
         if payload.ml_confidence_threshold is not None:
             env_updates["ML_CONFIDENCE_THRESHOLD"] = str(payload.ml_confidence_threshold)
+        if payload.active_symbols is not None:
+            cleaned_syms = [s.strip().upper() for s in payload.active_symbols if s.strip()]
+            _runtime_settings.active_symbols = cleaned_syms
+            if _engine:
+                _engine.set_enabled_symbols(cleaned_syms)
+            env_updates["TRADING_SYMBOLS"] = ",".join(cleaned_syms)
 
         if env_updates:
             atomic_update_env(env_updates)
@@ -1233,8 +1289,12 @@ def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_
         f"TF Primaire={_runtime_settings.primary_timeframe} | "
         f"MTF={_runtime_settings.mtf_enabled} (HTF={_runtime_settings.htf_timeframe}) | "
         f"SL×{_runtime_settings.sl_multiplier} | TP×{_runtime_settings.tp_multiplier} | "
-        f"Risk={_runtime_settings.risk_percent:.1%} | ML={_runtime_settings.ml_confidence_threshold:.0%}"
+        f"Risk={_runtime_settings.risk_percent:.1%} | ML={_runtime_settings.ml_confidence_threshold:.0%} | "
+        f"Symboles={_runtime_settings.active_symbols}"
     )
+
+    active_syms = list(_engine.symbols) if _engine and hasattr(_engine, 'symbols') else _runtime_settings.active_symbols
+    avail_syms = list(_engine.available_symbols) if _engine and hasattr(_engine, 'available_symbols') else _runtime_settings.available_symbols
 
     return {
         "status":                   "updated",
@@ -1248,12 +1308,16 @@ def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_
         "primary_timeframe":        _runtime_settings.primary_timeframe,
         "mtf_enabled":              _runtime_settings.mtf_enabled,
         "htf_timeframe":            _runtime_settings.htf_timeframe,
+        "active_symbols":           active_syms,
+        "available_symbols":         avail_syms,
     }
 
 
 @app.get("/settings")
 def get_settings():
     """Retourne les paramètres runtime actuels."""
+    active_syms = list(_engine.symbols) if _engine and hasattr(_engine, 'symbols') else _runtime_settings.active_symbols
+    avail_syms = list(_engine.available_symbols) if _engine and hasattr(_engine, 'available_symbols') else _runtime_settings.available_symbols
     return {
         "sl_multiplier":            _runtime_settings.sl_multiplier,
         "tp_multiplier":            _runtime_settings.tp_multiplier,
@@ -1265,6 +1329,8 @@ def get_settings():
         "primary_timeframe":        _runtime_settings.primary_timeframe,
         "mtf_enabled":              _runtime_settings.mtf_enabled,
         "htf_timeframe":            _runtime_settings.htf_timeframe,
+        "active_symbols":           active_syms,
+        "available_symbols":         avail_syms,
     }
 
 
