@@ -13,9 +13,14 @@ class SMCStrategy(StrategyBase):
     def __init__(self, name="SMC_ICT", weight=2.0, sl_multiplier=2.0, tp_multiplier=3.0):
         super().__init__(name, weight, sl_multiplier=sl_multiplier, tp_multiplier=tp_multiplier)
         self._df = pd.DataFrame()
+        self._df_htf = pd.DataFrame()
 
     def update_data(self, df: pd.DataFrame):
         self._df = df
+
+    def update_htf_data(self, df_htf: pd.DataFrame):
+        """Met à jour les données du Timeframe Supérieur (HTF, ex: H1) pour le biais directionnel."""
+        self._df_htf = df_htf
 
     def analyze(self, symbol: str) -> Optional[Signal]:
         if self._df.empty or len(self._df) < 15:
@@ -62,17 +67,26 @@ class SMCStrategy(StrategyBase):
             bullish_mss = current_close > swing_high
             bearish_mss = current_close < swing_low
             
-            # --- 3. Filtre de Tendance Macro (HTF Proxy via SMA 200) ---
-            # On vérifie la tendance globale sur les 200 bougies M1
+            # --- 3. Confluence Multi-Timeframe (MTF) ou Proxy Macro ---
             macro_trend_bullish = True
             macro_trend_bearish = True
-            if len(self._df) >= 200:
+            
+            if not self._df_htf.empty and len(self._df_htf) >= 10:
+                # Analyse HTF réelle (ex: H1) : Alignement strict sur la tendance institutionnelle
+                htf_close = self._df_htf['close'].iloc[-1]
+                htf_ema20 = self._df_htf['close'].ewm(span=20).mean().iloc[-1]
+                htf_ema50 = self._df_htf['close'].ewm(span=50).mean().iloc[-1] if len(self._df_htf) >= 50 else htf_ema20
+                macro_trend_bullish = (htf_close >= htf_ema20) and (htf_ema20 >= htf_ema50)
+                macro_trend_bearish = (htf_close <= htf_ema20) and (htf_ema20 <= htf_ema50)
+            elif len(self._df) >= 200:
+                # Fallback : Proxy SMA 200 sur timeframe unique
                 sma_200 = self._df['close'].rolling(window=200).mean().iloc[-1]
                 macro_trend_bullish = current_close > sma_200
                 macro_trend_bearish = current_close < sma_200
                 
             bullish_mss = bullish_mss and macro_trend_bullish
             bearish_mss = bearish_mss and macro_trend_bearish
+
 
             # --- 4. Détection Order Block (OB) Vectorisée ---
             # OB = Dernière bougie opposée suivie d'une forte impulsion (2 bougies)

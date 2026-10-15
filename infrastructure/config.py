@@ -29,6 +29,13 @@ class AppConfig(BaseSettings):
     ATR_SL_MULTIPLIER: float = Field(1.5, ge=0.1)
     ATR_TP_MULTIPLIER: float = Field(2.5, ge=0.1)
 
+    # ── Trading Modes & Multi-Timeframe (MTF) ────────────────────────────────
+    TRADING_MODE: str = Field("MTF_H1_M5", description="Mode actif: SCALPING_M5, DAYTRADING_M15, MTF_H1_M5, SWING_H1")
+    PRIMARY_TIMEFRAME: str = Field("M5", description="Timeframe d'entrée: M1, M5, M15, H1")
+    MTF_ENABLED: bool = Field(True, description="Active l'analyse et la confluence Multi-Timeframe")
+    HTF_TIMEFRAME: str = Field("H1", description="Timeframe supérieur de biais macro: M15, H1, H4, D1")
+
+
     # ── ML ────────────────────────────────────────────────────────────────────
     # Seuil calibré à 58% (cohérent avec l'accuracy modèle ~62.7%).
     # Overridable par symbole via ML_CONFIDENCE_THRESHOLD_EURUSD=0.55 dans .env
@@ -98,6 +105,21 @@ class AppConfig(BaseSettings):
     @property
     def TRADING_SYMBOLS(self) -> List[str]:
         return [s.strip() for s in self.TRADING_SYMBOLS_RAW.split(",") if s.strip()]
+
+    @staticmethod
+    def parse_timeframe(tf_str: str) -> int:
+        """Convertit un libellé de timeframe (M1, M5, M15, H1, H4, D1) en constante MT5."""
+        mapping = {
+            "M1": 1,
+            "M5": 5,
+            "M15": 15,
+            "M30": 30,
+            "H1": 16385,
+            "H4": 16388,
+            "D1": 16408,
+        }
+        return mapping.get((tf_str or "").strip().upper(), 5)
+
 
     @property
     def is_telegram_enabled(self) -> bool:

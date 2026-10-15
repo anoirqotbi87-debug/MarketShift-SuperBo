@@ -114,6 +114,10 @@ export interface WsSnapshot {
   killSwitch: boolean;
   isPaused: boolean;
   macro?: MacroEmbargoSummary;
+  tradingMode?: string;
+  primaryTimeframe?: string;
+  mtfEnabled?: boolean;
+  htfTimeframe?: string;
 }
 
 
@@ -171,6 +175,10 @@ export interface RuntimeSettings {
   trailing_stop_active: boolean;
   trailing_stop_multiplier: number;
   ml_confidence_threshold: number;
+  trading_mode?: string;
+  primary_timeframe?: string;
+  mtf_enabled?: boolean;
+  htf_timeframe?: string;
 }
 
 /** Corps accepté par POST /settings (tous champs optionnels). */
@@ -181,7 +189,12 @@ export interface SettingsPatch {
   trailing_stop_active?: boolean;
   trailing_stop_multiplier?: number;
   ml_confidence_threshold?: number;
+  trading_mode?: string;
+  primary_timeframe?: string;
+  mtf_enabled?: boolean;
+  htf_timeframe?: string;
 }
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Kelly API (GET /kelly)

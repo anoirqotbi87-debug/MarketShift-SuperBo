@@ -84,6 +84,11 @@ class RuntimeSettings:
     trailing_stop_active: bool   = True
     trailing_stop_multiplier: float = 1.0
     ml_confidence_threshold: float  = 0.58
+    trading_mode: str            = getattr(Config, "TRADING_MODE", "MTF_H1_M5")
+    primary_timeframe: str       = getattr(Config, "PRIMARY_TIMEFRAME", "M5")
+    mtf_enabled: bool            = getattr(Config, "MTF_ENABLED", True)
+    htf_timeframe: str           = getattr(Config, "HTF_TIMEFRAME", "H1")
+
 
 
 _runtime_settings = RuntimeSettings()
@@ -343,7 +348,12 @@ def _build_ws_snapshot() -> dict:
         "logs":       _memory_handler.get_logs()[:20],  # 20 derniers logs seulement
         "killSwitch": _engine.kill_switch.is_triggered if _engine else False,
         "isPaused":   _engine.state_manager.is_paused if _engine else False,
+        "tradingMode": _runtime_settings.trading_mode,
+        "primaryTimeframe": _runtime_settings.primary_timeframe,
+        "mtfEnabled": _runtime_settings.mtf_enabled,
+        "htfTimeframe": _runtime_settings.htf_timeframe,
     }
+
 
 
 
@@ -1054,6 +1064,11 @@ class SettingsPayload(BaseModel):
     trailing_stop_active: Optional[bool] = None
     trailing_stop_multiplier: Optional[float] = None
     ml_confidence_threshold: Optional[float] = None
+    trading_mode: Optional[str] = None
+    primary_timeframe: Optional[str] = None
+    mtf_enabled: Optional[bool] = None
+    htf_timeframe: Optional[str] = None
+
 
 class ApplySettingsPayload(BaseModel):
     slMult: float = Field(..., ge=0.5, le=5.0, description="Multiplicateur SL ATR borné entre 0.5 et 5.0")
@@ -1161,26 +1176,78 @@ def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_
     if payload.trailing_stop_multiplier is not None:
         _runtime_settings.trailing_stop_multiplier = payload.trailing_stop_multiplier
 
-    if payload.ml_confidence_threshold is not None:
-        _runtime_settings.ml_confidence_threshold = payload.ml_confidence_threshold
-        if _engine:
-            _engine.ml_predictor.set_confidence_threshold(payload.ml_confidence_threshold)
+    if payload.trading_mode is not None:
+        _runtime_settings.trading_mode = payload.trading_mode
+
+    if payload.primary_timeframe is not None:
+        _runtime_settings.primary_timeframe = payload.primary_timeframe
+
+    if payload.mtf_enabled is not None:
+        _runtime_settings.mtf_enabled = payload.mtf_enabled
+
+    if payload.htf_timeframe is not None:
+        _runtime_settings.htf_timeframe = payload.htf_timeframe
+
+    # Propagation vers l'Engine si actif
+    if _engine:
+        if (
+            payload.trading_mode is not None
+            or payload.primary_timeframe is not None
+            or payload.mtf_enabled is not None
+            or payload.htf_timeframe is not None
+        ):
+            _engine.update_trading_mode(
+                mode=_runtime_settings.trading_mode,
+                primary_tf=_runtime_settings.primary_timeframe,
+                mtf_enabled=_runtime_settings.mtf_enabled,
+                htf_tf=_runtime_settings.htf_timeframe
+            )
+
+    # Persistance automatique et atomique dans le fichier .env
+    try:
+        env_updates = {}
+        if payload.trading_mode is not None:
+            env_updates["TRADING_MODE"] = str(payload.trading_mode)
+        if payload.primary_timeframe is not None:
+            env_updates["PRIMARY_TIMEFRAME"] = str(payload.primary_timeframe)
+        if payload.mtf_enabled is not None:
+            env_updates["MTF_ENABLED"] = "true" if payload.mtf_enabled else "false"
+        if payload.htf_timeframe is not None:
+            env_updates["HTF_TIMEFRAME"] = str(payload.htf_timeframe)
+        if payload.sl_multiplier is not None:
+            env_updates["ATR_SL_MULTIPLIER"] = str(payload.sl_multiplier)
+        if payload.tp_multiplier is not None:
+            env_updates["ATR_TP_MULTIPLIER"] = str(payload.tp_multiplier)
+        if payload.risk_percent is not None:
+            env_updates["MAX_RISK_PER_TRADE_PCT"] = str(payload.risk_percent)
+        if payload.ml_confidence_threshold is not None:
+            env_updates["ML_CONFIDENCE_THRESHOLD"] = str(payload.ml_confidence_threshold)
+
+        if env_updates:
+            atomic_update_env(env_updates)
+    except Exception as env_err:
+        logging.warning(f"[API] Avertissement écriture .env: {env_err}")
 
     logging.info(
-        f"[API] Settings mis à jour: SL×{_runtime_settings.sl_multiplier} | "
-        f"TP×{_runtime_settings.tp_multiplier} | "
-        f"Risk={_runtime_settings.risk_percent:.1%} | "
-        f"ML Threshold={_runtime_settings.ml_confidence_threshold:.0%}"
+        f"[API] Settings mis à jour: Mode={_runtime_settings.trading_mode} | "
+        f"TF Primaire={_runtime_settings.primary_timeframe} | "
+        f"MTF={_runtime_settings.mtf_enabled} (HTF={_runtime_settings.htf_timeframe}) | "
+        f"SL×{_runtime_settings.sl_multiplier} | TP×{_runtime_settings.tp_multiplier} | "
+        f"Risk={_runtime_settings.risk_percent:.1%} | ML={_runtime_settings.ml_confidence_threshold:.0%}"
     )
 
     return {
-        "status":                  "updated",
-        "sl_multiplier":           _runtime_settings.sl_multiplier,
-        "tp_multiplier":           _runtime_settings.tp_multiplier,
-        "risk_percent":            _runtime_settings.risk_percent,
-        "trailing_stop_active":    _runtime_settings.trailing_stop_active,
-        "trailing_stop_multiplier": _runtime_settings.trailing_stop_multiplier,
-        "ml_confidence_threshold": _runtime_settings.ml_confidence_threshold,
+        "status":                   "updated",
+        "sl_multiplier":            _runtime_settings.sl_multiplier,
+        "tp_multiplier":            _runtime_settings.tp_multiplier,
+        "risk_percent":             _runtime_settings.risk_percent,
+        "trailing_stop_active":     _runtime_settings.trailing_stop_active,
+        "trailing_stop_multiplier":  _runtime_settings.trailing_stop_multiplier,
+        "ml_confidence_threshold":  _runtime_settings.ml_confidence_threshold,
+        "trading_mode":             _runtime_settings.trading_mode,
+        "primary_timeframe":        _runtime_settings.primary_timeframe,
+        "mtf_enabled":              _runtime_settings.mtf_enabled,
+        "htf_timeframe":            _runtime_settings.htf_timeframe,
     }
 
 
@@ -1188,13 +1255,18 @@ def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_
 def get_settings():
     """Retourne les paramètres runtime actuels."""
     return {
-        "sl_multiplier":           _runtime_settings.sl_multiplier,
-        "tp_multiplier":           _runtime_settings.tp_multiplier,
-        "risk_percent":            _runtime_settings.risk_percent,
-        "trailing_stop_active":    _runtime_settings.trailing_stop_active,
-        "trailing_stop_multiplier": _runtime_settings.trailing_stop_multiplier,
-        "ml_confidence_threshold": _runtime_settings.ml_confidence_threshold,
+        "sl_multiplier":            _runtime_settings.sl_multiplier,
+        "tp_multiplier":            _runtime_settings.tp_multiplier,
+        "risk_percent":             _runtime_settings.risk_percent,
+        "trailing_stop_active":     _runtime_settings.trailing_stop_active,
+        "trailing_stop_multiplier":  _runtime_settings.trailing_stop_multiplier,
+        "ml_confidence_threshold":  _runtime_settings.ml_confidence_threshold,
+        "trading_mode":             _runtime_settings.trading_mode,
+        "primary_timeframe":        _runtime_settings.primary_timeframe,
+        "mtf_enabled":              _runtime_settings.mtf_enabled,
+        "htf_timeframe":            _runtime_settings.htf_timeframe,
     }
+
 
 
 @app.get("/kelly")

@@ -15,9 +15,15 @@ class AMDStrategy(StrategyBase):
     def __init__(self, name="AMD_ICT", weight=2.5, sl_multiplier=2.0, tp_multiplier=3.0):
         super().__init__(name, weight, sl_multiplier=sl_multiplier, tp_multiplier=tp_multiplier)
         self._df = pd.DataFrame()
+        self._df_htf = pd.DataFrame()
 
     def update_data(self, df: pd.DataFrame):
         self._df = df.copy()
+
+    def update_htf_data(self, df_htf: pd.DataFrame):
+        """Met à jour les données du Timeframe Supérieur (HTF, ex: H1) pour valider l'alignement AMD."""
+        self._df_htf = df_htf.copy()
+
 
     def analyze(self, symbol: str) -> Optional[Signal]:
         # Nous avons besoin de suffisamment de données pour englober la session asiatique
@@ -98,7 +104,16 @@ class AMDStrategy(StrategyBase):
             pip_size = self.get_pip_size(symbol)
             sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
 
-            if manipulated_low and recent_sweep_low and bullish_mss:
+            # Filtre de confluence HTF si disponible
+            htf_bullish = True
+            htf_bearish = True
+            if not self._df_htf.empty and len(self._df_htf) >= 10:
+                htf_close = self._df_htf['close'].iloc[-1]
+                htf_ema20 = self._df_htf['close'].ewm(span=20).mean().iloc[-1]
+                htf_bullish = htf_close >= htf_ema20
+                htf_bearish = htf_close <= htf_ema20
+
+            if manipulated_low and recent_sweep_low and bullish_mss and htf_bullish:
                 # AMD BULLISH Confirmé
                 logging.debug(f"[{self.name}] 🟢 AMD SETUP DETECTED (Accumulation Sweep Low) sur {symbol} | Asian Low={asian_low}")
                 return Signal(
@@ -117,7 +132,7 @@ class AMDStrategy(StrategyBase):
             bearish_mss = current_close < micro_swing_low
             recent_sweep_high = (recent['high'] > asian_high).any()
 
-            if manipulated_high and recent_sweep_high and bearish_mss:
+            if manipulated_high and recent_sweep_high and bearish_mss and htf_bearish:
                 # AMD BEARISH Confirmé
                 logging.debug(f"[{self.name}] 🔴 AMD SETUP DETECTED (Accumulation Sweep High) sur {symbol} | Asian High={asian_high}")
                 return Signal(
@@ -129,6 +144,7 @@ class AMDStrategy(StrategyBase):
                     tp_pips=tp_pips,
                     atr=atr
                 )
+
 
         except Exception as e:
             logging.error(f"[{self.name}] Erreur AMD : {e}")

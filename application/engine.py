@@ -104,12 +104,21 @@ class Engine:
         self.news_filter = NewsFilter(pause_before_min=30, pause_after_min=30)
 
         # Stocker les constantes MT5 à l'init pour éviter tout problème de scope
-        # mt5.TIMEFRAME_M1 = 1
         self._tf_m1  = mt5.TIMEFRAME_M1
         self._tf_m15 = mt5.TIMEFRAME_M15
 
+        # Modes de trading & Multi-Timeframe (MTF)
+        self.trading_mode: str = getattr(Config, "TRADING_MODE", "MTF_H1_M5")
+        self.primary_timeframe_str: str = getattr(Config, "PRIMARY_TIMEFRAME", "M5")
+        self.mtf_enabled: bool = getattr(Config, "MTF_ENABLED", True)
+        self.htf_timeframe_str: str = getattr(Config, "HTF_TIMEFRAME", "H1")
+
+        self._tf_primary: int = Config.parse_timeframe(self.primary_timeframe_str)
+        self._tf_htf: int = Config.parse_timeframe(self.htf_timeframe_str)
+
         # Multi-symbole : chaque symbole a ses propres instances de stratégies
         self.symbols: list = Config.TRADING_SYMBOLS
+
         self._symbol_strategies: Dict[str, list] = {}
         self._symbol_aggregators: Dict[str, SignalAggregator] = {}
         self.latest_signals: Dict[str, Optional[Signal]] = {}
@@ -192,7 +201,30 @@ class Engine:
 
         logging.info("[Engine] ✅ Démarré avec succès en mode Asyncio.")
 
+    def update_trading_mode(
+        self,
+        mode: str,
+        primary_tf: Optional[str] = None,
+        mtf_enabled: Optional[bool] = None,
+        htf_tf: Optional[str] = None
+    ):
+        """Met à jour le mode de trading et la granularité temporelle à chaud."""
+        self.trading_mode = mode
+        if primary_tf:
+            self.primary_timeframe_str = primary_tf
+            self._tf_primary = Config.parse_timeframe(primary_tf)
+        if mtf_enabled is not None:
+            self.mtf_enabled = mtf_enabled
+        if htf_tf:
+            self.htf_timeframe_str = htf_tf
+            self._tf_htf = Config.parse_timeframe(htf_tf)
+        logging.info(
+            f"[Engine] 🎛️ Mode mis à jour: {self.trading_mode} "
+            f"| Primaire: {self.primary_timeframe_str} | MTF: {self.mtf_enabled} (HTF: {self.htf_timeframe_str})"
+        )
+
     def _run_async_loop_thread(self):
+
         """Démarre la boucle d'événements asyncio dans le thread dédié avec capture des exceptions fatales."""
         try:
             if not self.connector.connect():
@@ -346,10 +378,10 @@ class Engine:
 
     async def _process_symbol_async(self, symbol: str):
         """Traite un symbole de manière asynchrone : données → signal → ML → sizing → exécution."""
-        # 1. Récupérer les données OHLCV M15 — timeout 5s strict pour éviter les freezes MT5
+        # 1. Récupérer les données OHLCV primaire (LTF) — timeout 5s strict
         try:
             df = await asyncio.wait_for(
-                asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_m15, 200),
+                asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_primary, 200),
                 timeout=5.0
             )
         except asyncio.TimeoutError:
@@ -368,19 +400,35 @@ class Engine:
 
         last_close = df.iloc[-1]['close']
         last_candle_time = df.iloc[-1]['time']
-        logging.debug(f"[Engine] {symbol} M5 Last Close: {last_close:.5f}")
+        logging.debug(f"[Engine] {symbol} {self.primary_timeframe_str} Last Close: {last_close:.5f}")
+
+        # 1.2 Multi-Timeframe (MTF) : Récupération du Timeframe Supérieur (HTF, ex: H1)
+        df_htf = None
+        if self.mtf_enabled:
+            try:
+                df_htf = await asyncio.wait_for(
+                    asyncio.to_thread(self.connector.get_historical_data, symbol, self._tf_htf, 100),
+                    timeout=5.0
+                )
+                if df_htf is not None and len(df_htf) >= 2:
+                    df_htf = df_htf.iloc[:-1].copy()
+            except Exception as e:
+                logging.debug(f"[Engine] Erreur fetch HTF {symbol}: {e}")
         
         # Filtre Macro-Économique
         if self.news_filter.is_news_embargo(symbol):
             # En embargo de news: on skip la recherche de nouveaux signaux
             return
 
-        # 2. Nourrir les stratégies
+        # 2. Nourrir les stratégies (Primaire LTF + Biais HTF)
         for strategy in self._symbol_strategies[symbol]:
             strategy.update_data(df)
+            if self.mtf_enabled and df_htf is not None and not df_htf.empty and hasattr(strategy, 'update_htf_data'):
+                strategy.update_htf_data(df_htf)
 
         # 3. Signal technique via l'Aggregator
         signal: Optional[Signal] = self._symbol_aggregators[symbol].aggregate(symbol)
+
         self.latest_signals[symbol] = signal
         if not signal:
             return
