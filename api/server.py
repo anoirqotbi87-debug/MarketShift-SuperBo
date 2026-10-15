@@ -309,26 +309,27 @@ def _build_ws_snapshot() -> dict:
     # ML Stats
     ml_data = {}
     if _engine:
-            raw_imp = _engine.ml_trainer.get_feature_importances() or {}
-            ml_data = {
-                "trained": _engine.ml_trainer.is_trained,
-                "accuracy": round(_engine.ml_trainer.accuracy, 3),
-                "sampleCount": _engine.ml_trainer.sample_count,
-                "lastTrained": _engine.ml_trainer.last_trained,
-                "featureImportances": [
-                    {"feature": str(k), "importance": round(float(v), 4)}
-                    for k, v in raw_imp.items()
-                ],
-                "rawFeatureImportances": raw_imp,
-            }
+        raw_imp = _engine.ml_trainer.get_feature_importances() or {}
+        ml_data = {
+            "trained": _engine.ml_trainer.is_trained,
+            "accuracy": round(_engine.ml_trainer.accuracy, 3),
+            "sampleCount": _engine.ml_trainer.sample_count,
+            "lastTrained": _engine.ml_trainer.last_trained,
+            "featureImportances": [
+                {"feature": str(k), "importance": round(float(v), 4)}
+                for k, v in raw_imp.items()
+            ],
+            "rawFeatureImportances": raw_imp,
+        }
 
-        # Macro Embargo Summary
-        macro_data = None
-        if hasattr(_engine, 'news_filter') and _engine.news_filter:
-            try:
-                macro_data = _engine.news_filter.get_embargo_summary(_engine.symbols)
-            except Exception:
-                pass
+    # Macro Embargo Summary
+    macro_data = None
+    if _engine and hasattr(_engine, 'news_filter') and _engine.news_filter:
+        try:
+            macro_data = _engine.news_filter.get_embargo_summary(_engine.symbols)
+        except Exception:
+            pass
+
 
     return {
         "type":       "snapshot",
