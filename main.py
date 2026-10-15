@@ -1,10 +1,7 @@
 import sys
-import threading
 import multiprocessing
 import uvicorn
 import logging
-import asyncio
-from datetime import datetime
 
 # Force UTF-8 encoding for Windows terminals to prevent emoji crashes
 try:
@@ -23,13 +20,10 @@ logging.basicConfig(
     ]
 )
 
-from fastapi import FastAPI
 from infrastructure.config import Config
-from infrastructure.mt5_connector import MT5Connector
 from application.engine import Engine
 from api.server import app, init_api
 from infrastructure.database import engine, Base, SessionLocal
-from infrastructure import models
 
 # Création des tables de la base de données
 Base.metadata.create_all(bind=engine)
@@ -39,25 +33,9 @@ Base.metadata.create_all(bind=engine)
 def main():
     logging.info(f"=== Démarrage MarketShift SuperBot V2.0 ({Config.ENVIRONMENT}) ===")
     
-    # Connecteur Primaire (XM)
-    try:
-        xm_login = int(Config.XM_LOGIN) if Config.XM_LOGIN else 0
-    except ValueError:
-        xm_login = 0
-    xm_connector = MT5Connector(xm_login, Config.XM_PASSWORD, Config.XM_SERVER)
-
-    # Connecteur Fallback (Exness)
-    try:
-        exness_login = int(Config.EXNESS_LOGIN) if Config.EXNESS_LOGIN else 0
-    except ValueError:
-        exness_login = 0
-    exness_connector = MT5Connector(exness_login, Config.EXNESS_PASSWORD, Config.EXNESS_SERVER)
-
-    import sys
-    print("Step 1: Router"); sys.stdout.flush()
-    # Routeur Haute Disponibilité
-    from infrastructure.broker_router import BrokerRouter
-    router = BrokerRouter(primary=xm_connector, fallback=exness_connector)
+    # Routeur Multi-Courtiers / Connecteur selon BROKER_MODE
+    from infrastructure.broker_router import create_connector_from_config
+    router = create_connector_from_config(Config)
 
     print("Step 2: DB Session"); sys.stdout.flush()
     db_session = SessionLocal()
