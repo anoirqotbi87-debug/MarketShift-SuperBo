@@ -84,8 +84,8 @@ const REJECTION_DESCRIPTIONS: Record<
     severity: "warning",
   },
   VALIDATOR_TIMEOUT: {
-    label: "Dépassement Délai Validation (4s)",
-    description: "Le validateur de risque a mis plus de 4s à répondre. Ordre annulé par sécurité.",
+    label: "Dépassement Délai Validation (10s)",
+    description: "Le validateur de risque a mis plus de 10s à répondre. Ordre annulé par sécurité.",
     severity: "warning",
   },
 };
@@ -117,8 +117,11 @@ export default function RiskMetricsPanel({ snapshot, equityCurve }: RiskMetricsP
       bySym.set(p.symbol, e);
     }
     const maxSym = Array.from(bySym.entries()).sort((a, b) => b[1].lots - a[1].lots)[0]?.[1];
-    const exposurePct = account && account.equity > 0 ? ((account.balance - account.freeMargin) / account.equity) * 100 : 0;
-    const marginLevelPct = account?.marginLevel ?? (account && account.equity > 0 ? (account.equity / Math.max(1, account.balance - account.freeMargin)) * 100 : 0);
+    
+    // Marge réellement utilisée = Capitaux propres - Marge libre
+    const usedMargin = account && account.equity > 0 ? Math.max(0, account.equity - account.freeMargin) : 0;
+    const exposurePct = account && account.equity > 0 ? (usedMargin / account.equity) * 100 : 0;
+    const marginLevelPct = account?.marginLevel ?? (usedMargin > 0 ? (account.equity / usedMargin) * 100 : 0);
 
     return { currentDd, maxDd, maxSymLots: maxSym?.lots ?? 0, exposurePct, marginLevelPct };
   }, [equityCurve, account, positions]);

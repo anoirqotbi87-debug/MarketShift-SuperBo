@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   Layers,
@@ -162,7 +162,7 @@ interface SliderProps {
   onChange: (v: number) => void;
 }
 
-function Slider({ label, value, min, max, step, suffix = "", onChange }: SliderProps) {
+const Slider = memo(function Slider({ label, value, min, max, step, suffix = "", onChange }: SliderProps) {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
@@ -188,7 +188,72 @@ function Slider({ label, value, min, max, step, suffix = "", onChange }: SliderP
       />
     </div>
   );
+});
+
+interface SymbolCardProps {
+  sym: string;
+  meta: SymbolMeta;
+  isAct: boolean;
+  catClass: string;
+  onToggle: (sym: string) => void;
 }
+
+const SymbolCard = memo(function SymbolCard({
+  sym,
+  meta,
+  isAct,
+  catClass,
+  onToggle,
+}: SymbolCardProps) {
+  return (
+    <div
+      onClick={() => onToggle(sym)}
+      className={`group relative flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition select-none ${
+        isAct
+          ? "bg-cyan-500/5 border-cyan-500/40 hover:border-cyan-400 shadow-sm shadow-cyan-500/10"
+          : "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 opacity-60 hover:opacity-80"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-mono text-xs font-bold text-zinc-100">{sym}</span>
+            <span className={`text-[9px] px-1.5 py-0.2 rounded border font-medium ${catClass}`}>
+              {meta.category}
+            </span>
+          </div>
+          <p className="text-[10px] text-zinc-400 mt-1 truncate" title={meta.name}>
+            {meta.name}
+          </p>
+        </div>
+        <div
+          className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
+            isAct ? "bg-cyan-500" : "bg-zinc-700"
+          }`}
+        >
+          <span
+            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+              isAct ? "translate-x-4" : "translate-x-1"
+            }`}
+          />
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-zinc-800/60 pt-2">
+        <span className={isAct ? "text-cyan-400 font-semibold" : "text-zinc-500"}>
+          {isAct ? "Trading Actif" : "En Pause"}
+        </span>
+        <span
+          className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+            isAct ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800 text-zinc-500"
+          }`}
+        >
+          {isAct ? "ON" : "OFF"}
+        </span>
+      </div>
+    </div>
+  );
+});
 
 export default function ConfigPanel() {
   const [settings, setSettings] = useState<RuntimeSettings>(DEFAULT_SETTINGS);
@@ -273,22 +338,32 @@ export default function ConfigPanel() {
     }));
   };
 
-  const toggleSymbolConfig = async (sym: string) => {
-    const current = settings.active_symbols || [];
-    const isNowActive = !current.includes(sym);
-    const updated = isNowActive
-      ? [...current, sym]
-      : current.filter((s) => s !== sym);
-    setSettings((prev) => ({
-      ...prev,
-      active_symbols: updated,
-    }));
-    try {
-      await toggleSymbol(sym, isNowActive);
-    } catch {
-      // ignore
-    }
-  };
+  const filteredSymbols = useMemo(() => {
+    const avail = settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS;
+    const cat = symbolCategory;
+    const q = symbolSearch.toLowerCase().trim();
+    return avail.filter((sym) => {
+      const meta = getSymbolMeta(sym);
+      if (cat !== "Tous" && meta.category !== cat) return false;
+      if (q && !sym.toLowerCase().includes(q) && !meta.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [settings.available_symbols, symbolCategory, symbolSearch]);
+
+  const toggleSymbolConfig = useCallback((sym: string) => {
+    setSettings((prev) => {
+      const current = prev.active_symbols || [];
+      const isNowActive = !current.includes(sym);
+      const updated = isNowActive
+        ? [...current, sym]
+        : current.filter((s) => s !== sym);
+      toggleSymbol(sym, isNowActive).catch(() => {});
+      return {
+        ...prev,
+        active_symbols: updated,
+      };
+    });
+  }, []);
 
   const setAllSymbols = async (enable: boolean) => {
     const target = enable ? [...(settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)] : [];
@@ -610,81 +685,29 @@ export default function ConfigPanel() {
 
           {/* Grille de cartes symboles */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {(settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)
-              .filter((sym) => {
-                const meta = getSymbolMeta(sym);
-                if (symbolCategory !== "Tous" && meta.category !== symbolCategory) {
-                  return false;
-                }
-                if (symbolSearch.trim()) {
-                  const q = symbolSearch.toLowerCase().trim();
-                  return sym.toLowerCase().includes(q) || meta.name.toLowerCase().includes(q);
-                }
-                return true;
-              })
-              .map((sym) => {
-                const isAct = (settings.active_symbols || []).includes(sym);
-                const meta = getSymbolMeta(sym);
-                const catClass =
-                  meta.category === "Cryptos"
-                    ? "bg-orange-500/10 text-orange-400 border-orange-500/20"
-                    : meta.category === "Matières Premières"
-                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                    : meta.category === "Indices"
-                    ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                    : "bg-blue-500/10 text-blue-400 border-blue-500/20";
+            {filteredSymbols.map((sym) => {
+              const isAct = (settings.active_symbols || []).includes(sym);
+              const meta = getSymbolMeta(sym);
+              const catClass =
+                meta.category === "Cryptos"
+                  ? "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                  : meta.category === "Matières Premières"
+                  ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                  : meta.category === "Indices"
+                  ? "bg-purple-500/10 text-purple-400 border-purple-500/20"
+                  : "bg-blue-500/10 text-blue-400 border-blue-500/20";
 
-                return (
-                  <div
-                    key={sym}
-                    onClick={() => toggleSymbolConfig(sym)}
-                    className={`group relative flex flex-col justify-between rounded-xl border p-3.5 cursor-pointer transition select-none ${
-                      isAct
-                        ? "bg-cyan-500/5 border-cyan-500/40 hover:border-cyan-400 shadow-sm shadow-cyan-500/10"
-                        : "bg-zinc-900/40 border-zinc-800 hover:border-zinc-700 opacity-60 hover:opacity-80"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-mono text-xs font-bold text-zinc-100">{sym}</span>
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded border font-medium ${catClass}`}>
-                            {meta.category}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-zinc-400 mt-1 truncate" title={meta.name}>
-                          {meta.name}
-                        </p>
-                      </div>
-                      {/* Toggle switch visual */}
-                      <div
-                        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-200 ease-in-out ${
-                          isAct ? "bg-cyan-500" : "bg-zinc-700"
-                        }`}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                            isAct ? "translate-x-4" : "translate-x-1"
-                          }`}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between text-[10px] font-mono border-t border-zinc-800/60 pt-2">
-                      <span className={isAct ? "text-cyan-400 font-semibold" : "text-zinc-500"}>
-                        {isAct ? "Trading Actif" : "En Pause"}
-                      </span>
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
-                          isAct ? "bg-cyan-500/20 text-cyan-300" : "bg-zinc-800 text-zinc-500"
-                        }`}
-                      >
-                        {isAct ? "ON" : "OFF"}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+              return (
+                <SymbolCard
+                  key={sym}
+                  sym={sym}
+                  meta={meta}
+                  isAct={isAct}
+                  catClass={catClass}
+                  onToggle={toggleSymbolConfig}
+                />
+              );
+            })}
           </div>
           <p className="text-[10px] text-zinc-500 mt-3 font-mono leading-relaxed">
             💡 <b>Sécurité garantie</b> : Désactiver un actif met en pause la détection et l&apos;ouverture de nouveaux ordres sur celui-ci. Les positions déjà ouvertes sur cet actif continuent d&apos;être protégées et clôturées normalement par le Stop Loss, le Take Profit et le Trailing Stop.

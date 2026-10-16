@@ -51,7 +51,7 @@ export default function KellySizer({ snapshot }: KellySizerProps) {
       pipValuePerLot: pipValPerLot,
       accountBalance: balance,
     };
-  }, [kelly, snapshot.account.balance, riskPct, slPips, symbol]);
+  }, [kelly, snapshot.account?.balance, riskPct, slPips, symbol]);
 
   const maxRisk = kelly ? Math.max(1, Math.min(5, kelly.kellyPct / 5)) : 1.5;
 
