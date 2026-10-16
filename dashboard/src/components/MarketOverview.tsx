@@ -58,7 +58,9 @@ export default function MarketOverview() {
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {entries.map((e) => {
-          const up = e.changePct >= 0;
+          const rawPrice = typeof e.price === "number" ? e.price : typeof (e as any).currentPrice === "number" ? (e as any).currentPrice : 0;
+          const rawChangePct = typeof e.changePct === "number" ? e.changePct : typeof (e as any).change24hPct === "number" ? (e as any).change24hPct : 0;
+          const up = rawChangePct >= 0;
           const points = spark[e.symbol] ?? [];
           return (
             <div
@@ -83,11 +85,11 @@ export default function MarketOverview() {
               </div>
               <div className="flex items-end justify-between gap-2">
                 <div>
-                  <p className="font-mono text-lg font-bold text-zinc-100">{e.price.toFixed(e.price < 10 ? 4 : 2)}</p>
+                  <p className="font-mono text-lg font-bold text-zinc-100">{rawPrice.toFixed(rawPrice < 10 ? 4 : 2)}</p>
                   <p className={`inline-flex items-center gap-1 font-mono text-[11px] ${up ? "text-emerald-400" : "text-rose-400"}`}>
                     {up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
                     {up ? "+" : ""}
-                    {e.changePct.toFixed(2)}%
+                    {rawChangePct.toFixed(2)}%
                   </p>
                 </div>
                 <div className="h-10 w-24">
@@ -96,7 +98,7 @@ export default function MarketOverview() {
                       <YAxis hide domain={["dataMin", "dataMax"]} />
                       <Tooltip
                         contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "10px" }}
-                        formatter={(v) => [Number(v).toFixed(5), "Prix"]}
+                        formatter={(v) => [Number(v ?? 0).toFixed(5), "Prix"]}
                       />
                       <Line
                         type="monotone"

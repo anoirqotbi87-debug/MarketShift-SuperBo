@@ -94,10 +94,10 @@ export default function MarketDepthChart({ symbol = "EURUSD", height = 320 }: Ma
 
           <div className="mt-1 flex items-center justify-between rounded-md border border-zinc-800 bg-zinc-900/80 px-3 py-1.5">
             <span className="font-mono text-[10px] uppercase text-zinc-500">Mid</span>
-            <span className="font-mono text-sm font-bold text-cyan-300">{data.midPrice.toFixed(5)}</span>
+            <span className="font-mono text-sm font-bold text-cyan-300">{(data.midPrice ?? 0).toFixed(5)}</span>
             <span className="font-mono text-[10px] text-zinc-500">
-              {data.bids.length > 0 ? data.bids[0].price.toFixed(5) : "—"} /{" "}
-              {data.asks.length > 0 ? data.asks[0].price.toFixed(5) : "—"}
+              {data.bids.length > 0 ? (data.bids[0].price ?? 0).toFixed(5) : "—"} /{" "}
+              {data.asks.length > 0 ? (data.asks[0].price ?? 0).toFixed(5) : "—"}
             </span>
           </div>
 
@@ -119,7 +119,7 @@ function DepthRow({
   side: "bid" | "ask";
   maxVol: number;
 }) {
-  const pct = Math.min(100, (level.totalVolume / maxVol) * 100);
+  const pct = Math.min(100, ((level.totalVolume ?? 0) / Math.max(1, maxVol)) * 100);
   const isBid = side === "bid";
 
   return (
@@ -133,13 +133,13 @@ function DepthRow({
         <div className="flex items-center gap-2">
           <span className={`h-1.5 w-1.5 rounded-full ${isBid ? "bg-emerald-400" : "bg-rose-400"}`} />
           <span className={isBid ? "text-emerald-300" : "text-rose-300"}>
-            {level.price.toFixed(5)}
+            {(level.price ?? 0).toFixed(5)}
           </span>
         </div>
         <div className="flex items-center gap-3 text-zinc-500">
-          <span>{level.volume.toFixed(1)}</span>
-          <span className="w-16 text-right text-zinc-400">{level.totalVolume.toFixed(1)}</span>
-          <span className="w-8 text-right text-zinc-600">{level.ordersCount} ordres</span>
+          <span>{(level.volume ?? 0).toFixed(1)}</span>
+          <span className="w-16 text-right text-zinc-400">{(level.totalVolume ?? 0).toFixed(1)}</span>
+          <span className="w-8 text-right text-zinc-600">{level.ordersCount ?? 0} ordres</span>
         </div>
       </div>
     </div>

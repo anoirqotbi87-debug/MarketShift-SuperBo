@@ -64,7 +64,7 @@ export default function PositionDistribution({ snapshot }: PositionDistributionP
             </Pie>
             <Tooltip
               contentStyle={{ backgroundColor: "#101012", borderColor: "#27272a", fontSize: "11px" }}
-              formatter={(v, name) => [`${Number(v).toFixed(2)} lots`, String(name)]}
+              formatter={(v, name) => [`${Number(v ?? 0).toFixed(2)} lots`, String(name)]}
             />
           </PieChart>
         </ResponsiveContainer>
@@ -76,10 +76,10 @@ export default function PositionDistribution({ snapshot }: PositionDistributionP
             className="inline-flex items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900/60 px-2 py-1 font-mono text-[10px] text-zinc-300"
           >
             <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-            {d.name} · {d.count} pos · {d.value.toFixed(2)} lots
-            <span className={d.pnl >= 0 ? "text-emerald-400" : "text-rose-400"}>
-              {d.pnl >= 0 ? "+" : ""}
-              ${d.pnl.toFixed(2)}
+            {d.name} · {d.count} pos · {(d.value ?? 0).toFixed(2)} lots
+            <span className={(d.pnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}>
+              {(d.pnl ?? 0) >= 0 ? "+" : ""}
+              ${(d.pnl ?? 0).toFixed(2)}
             </span>
           </span>
         ))}

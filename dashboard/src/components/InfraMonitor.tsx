@@ -81,8 +81,8 @@ export default function InfraMonitor() {
       </div>
 
       <div className="mb-4 grid grid-cols-3 gap-3">
-        <Metric icon={<Clock className="h-3.5 w-3.5" />} label="Ping MT5" value={`${avg.toFixed(1)}`} unit="ms" accent="text-emerald-400" />
-        <Metric icon={<Zap className="h-3.5 w-3.5" />} label="Throughput" value={`${avgTp.toFixed(0)}`} unit="req/s" accent="text-indigo-400" />
+        <Metric icon={<Clock className="h-3.5 w-3.5" />} label="Ping MT5" value={`${(Number.isFinite(avg) ? avg : 0).toFixed(1)}`} unit="ms" accent="text-emerald-400" />
+        <Metric icon={<Zap className="h-3.5 w-3.5" />} label="Throughput" value={`${(Number.isFinite(avgTp) ? avgTp : 0).toFixed(0)}`} unit="req/s" accent="text-indigo-400" />
         <Metric
           icon={<Activity className="h-3.5 w-3.5" />}
           label="CPU / RAM"
