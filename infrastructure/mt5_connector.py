@@ -14,12 +14,67 @@ import pandas as pd
 from core.interfaces import IBrokerConnector, AccountInfo, PositionInfo, OrderType
 
 class MT5Connector(IBrokerConnector):
+    ALIAS_MAP = {
+        "XAUUSD": ["GOLD", "XAUUSD#", "GOLDmicro", "GOLD#", "XAUUSD"],
+        "GOLD": ["GOLD", "XAUUSD", "GOLDmicro", "GOLD#"],
+        "SILVER": ["SILVER", "XAGUSD", "SILVERmicro", "SILVER#"],
+        "XAGUSD": ["SILVER", "XAGUSD", "SILVERmicro", "SILVER#"],
+        "USOIL": ["OIL", "OILCash", "USOILCash", "USOIL#", "USOIL", "WTI"],
+        "GER40": ["GER40Cash", "DE40Cash", "GER40#", "GER40", "GER30", "DE40"],
+        "US500": ["US500Cash", "US500#", "SPX500Cash", "US500"],
+        "US100": ["US100Cash", "US100#", "NAS100Cash", "US100", "USTEC"],
+        "US30": ["US30Cash", "US30#", "DJ30Cash", "US30", "WALLSTREET"],
+        "BTCUSD": ["BTCUSD", "BTCUSD#", "BITCOIN", "BTCUSDmicro"],
+        "ETHUSD": ["ETHUSD", "ETHUSD#", "ETHEREUM", "ETHUSDmicro"],
+        "SOLUSD": ["SOLUSD", "SOLUSD#", "SOLANA", "SOLUSDmicro"],
+    }
+
     def __init__(self, login: int, password: str, server: str):
         self.login = login
         self.password = password
         self.server = server
         self.connected = False
         self._lock = threading.Lock()
+        self._resolved_symbols: Dict[str, Optional[str]] = {}
+
+    def resolve_symbol(self, symbol: str) -> Optional[str]:
+        """Résout dynamiquement les alias du broker (ex: XM nomme XAUUSD -> GOLD, GER40 -> GER40Cash)."""
+        if not self.connected or mt5 is None:
+            return symbol
+
+        sym_clean = symbol.strip().upper()
+        if sym_clean in self._resolved_symbols:
+            return self._resolved_symbols[sym_clean]
+
+        with self._lock:
+            mt5.initialize()
+            # 1. Tester le symbole brut
+            info = mt5.symbol_info(sym_clean)
+            if info is not None:
+                mt5.symbol_select(sym_clean, True)
+                self._resolved_symbols[sym_clean] = sym_clean
+                return sym_clean
+
+            # 2. Tester les alias connus
+            candidates = list(self.ALIAS_MAP.get(sym_clean, []))
+            for base in [sym_clean, sym_clean.replace("#", "")]:
+                for suffix in ["#", "micro", "Cash", "m", ".raw"]:
+                    cand = f"{base}{suffix}"
+                    if cand not in candidates:
+                        candidates.append(cand)
+
+            for cand in candidates:
+                c_info = mt5.symbol_info(cand)
+                if c_info is not None:
+                    mt5.symbol_select(cand, True)
+                    logging.info(f"[MT5Connector] 🎯 Symbole {sym_clean} résolu en alias broker : '{cand}'")
+                    self._resolved_symbols[sym_clean] = cand
+                    return cand
+
+        # 3. Non disponible sur ce broker
+        self._resolved_symbols[sym_clean] = None
+        logging.warning(f"[MT5Connector] ⚠️ Symbole '{sym_clean}' non disponible dans le catalogue de ce broker ({self.server}). Scan ignoré.")
+        return None
 
     def connect(self) -> bool:
         if mt5 is None:
@@ -71,9 +126,11 @@ class MT5Connector(IBrokerConnector):
 
     def get_symbol_info(self, symbol: str) -> Optional[Any]:
         if not self.connected: return None
+        real_sym = self.resolve_symbol(symbol)
+        if not real_sym: return None
         with self._lock:
             mt5.initialize()
-            info = mt5.symbol_info(symbol)
+            info = mt5.symbol_info(real_sym)
         return info
 
     def get_history_deals(self, from_date: Any, to_date: Any) -> Optional[Any]:
@@ -113,6 +170,11 @@ class MT5Connector(IBrokerConnector):
 
     def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
         if not self.connected: return None
+        real_sym = self.resolve_symbol(symbol)
+        if not real_sym:
+            logging.error(f"[MT5Connector] Impossible d'exécuter l'ordre: symbole {symbol} non résolu")
+            return None
+        symbol = real_sym
         
         with self._lock:
             mt5.initialize()
@@ -213,6 +275,8 @@ class MT5Connector(IBrokerConnector):
     def modify_position(self, ticket: int, symbol: str, new_sl: float) -> bool:
         """Modifie le Stop Loss d'une position existante avec vérification du Stops Level."""
         if not self.connected: return False
+        real_sym = self.resolve_symbol(symbol) or symbol
+        symbol = real_sym
 
         # Mécanisme de Retry
         for attempt in range(3):
@@ -255,24 +319,26 @@ class MT5Connector(IBrokerConnector):
 
     def get_historical_data(self, symbol: str, timeframe: int, num_candles: int) -> Optional[pd.DataFrame]:
         """Récupère l'historique OHLCV (Open, High, Low, Close, Volume) pour un symbole donné"""
-        if not self.connected: 
+        if not self.connected or mt5 is None: 
+            return None
+
+        real_sym = self.resolve_symbol(symbol)
+        if not real_sym:
             return None
             
         with self._lock:
             mt5.initialize()
-            # S'assurer que le symbole est visible dans le Market Watch
-            mt5.symbol_select(symbol, True)
+            mt5.symbol_select(real_sym, True)
                 
-            # --- CORRECTION ANOMALIE : RETRY CACHE MT5 ---
-            # timeframe MT5 (ex: mt5.TIMEFRAME_M15)
+            rates = None
             for _ in range(3):
-                rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, num_candles)
+                rates = mt5.copy_rates_from_pos(real_sym, timeframe, 0, num_candles)
                 if rates is not None and len(rates) > 0:
                     break
-                time.sleep(0.1)
+                time.sleep(0.05)
         
         if rates is None or len(rates) == 0:
-            logging.error(f"Impossible de récupérer l'historique pour {symbol} après 3 tentatives.")
+            logging.debug(f"[MT5Connector] Aucune donnée reçue pour {real_sym} ({symbol})")
             return None
             
         # Conversion en DataFrame Pandas

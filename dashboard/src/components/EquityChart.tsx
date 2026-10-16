@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useMemo, useTransition, memo } from "react";
 import {
   Area,
   AreaChart,
@@ -21,7 +21,7 @@ interface EquityChartProps {
 
 type RangeKey = "1D" | "1M" | "1D+BM";
 
-const RangeBtn = ({
+const RangeBtn = memo(function RangeBtn({
   value,
   active,
   onSelect,
@@ -29,23 +29,25 @@ const RangeBtn = ({
   value: string;
   active: boolean;
   onSelect: () => void;
-}) => (
-  <button
-    onClick={onSelect}
-    className={`rounded-md px-2.5 py-1 font-mono text-[11px] font-medium transition ${
-      active
-        ? "bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-800"
-        : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-    }`}
-  >
-    {value}
-  </button>
-);
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={`rounded-md px-2.5 py-1 font-mono text-[11px] font-medium transition ${
+        active
+          ? "bg-cyan-500/15 text-cyan-300 ring-1 ring-cyan-800"
+          : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+      }`}
+    >
+      {value}
+    </button>
+  );
+});
 
 const fmtUsd = (v: number) =>
   `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("fr-FR", { maximumFractionDigits: 0 })}`;
 
-function ChartTooltip({ active, payload, label }: any) {
+const ChartTooltip = memo(function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null;
   const row = payload[0].payload as EquityPoint;
   return (
@@ -59,20 +61,28 @@ function ChartTooltip({ active, payload, label }: any) {
       </p>
     </div>
   );
-}
+});
 
-export default function EquityChart({ data1D, data1M, benchmark, loading }: EquityChartProps) {
+function EquityChartComponent({ data1D, data1M, benchmark, loading }: EquityChartProps) {
   const [range, setRange] = useState<RangeKey>("1D");
+  const [, startTransition] = useTransition();
+
+  const handleSelectRange = (newRange: RangeKey) => {
+    startTransition(() => {
+      setRange(newRange);
+    });
+  };
 
   const showBenchmark = range === "1D+BM";
-  const data = range === "1M" ? data1M : data1D;
+  const data = useMemo(() => (range === "1M" ? data1M : data1D), [range, data1D, data1M]);
 
-  const combined = showBenchmark
-    ? data.map((p, i) => ({
-        ...p,
-        bench: benchmark[i]?.equity ?? null,
-      }))
-    : data;
+  const combined = useMemo(() => {
+    if (!showBenchmark) return data;
+    return data.map((p, i) => ({
+      ...p,
+      bench: benchmark[i]?.equity ?? null,
+    }));
+  }, [showBenchmark, data, benchmark]);
 
   return (
     <section className="card flex h-full flex-col p-4">
@@ -84,17 +94,17 @@ export default function EquityChart({ data1D, data1M, benchmark, loading }: Equi
           <RangeBtn
             value="1D"
             active={range === "1D"}
-            onSelect={() => setRange("1D")}
+            onSelect={() => handleSelectRange("1D")}
           />
           <RangeBtn
             value="1M"
             active={range === "1M"}
-            onSelect={() => setRange("1M")}
+            onSelect={() => handleSelectRange("1M")}
           />
           <RangeBtn
             value="1D vs Benchmark"
             active={range === "1D+BM"}
-            onSelect={() => setRange("1D+BM")}
+            onSelect={() => handleSelectRange("1D+BM")}
           />
         </div>
       </div>
@@ -133,7 +143,7 @@ export default function EquityChart({ data1D, data1M, benchmark, loading }: Equi
                 width={64}
                 tickFormatter={fmtUsd}
               />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip />} isAnimationActive={false} />
               <Area
                 type="monotone"
                 dataKey="equity"
@@ -142,6 +152,7 @@ export default function EquityChart({ data1D, data1M, benchmark, loading }: Equi
                 strokeWidth={2}
                 fill="url(#eqGrad)"
                 dot={false}
+                isAnimationActive={false}
               />
               {showBenchmark && (
                 <Area
@@ -153,6 +164,7 @@ export default function EquityChart({ data1D, data1M, benchmark, loading }: Equi
                   strokeDasharray="4 4"
                   fill="url(#bmGrad)"
                   dot={false}
+                  isAnimationActive={false}
                 />
               )}
             </AreaChart>
@@ -162,3 +174,5 @@ export default function EquityChart({ data1D, data1M, benchmark, loading }: Equi
     </section>
   );
 }
+
+export default memo(EquityChartComponent);

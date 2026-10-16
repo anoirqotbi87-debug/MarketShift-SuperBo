@@ -440,6 +440,8 @@ class Engine:
             return
 
         if df is None or len(df) < 2:
+            if hasattr(self.connector, "resolve_symbol") and not self.connector.resolve_symbol(symbol):
+                return
             logging.warning(f"[Engine] Pas de données pour {symbol}")
             return
             

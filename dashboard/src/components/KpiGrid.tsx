@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { TrendingDown, TrendingUp, Wallet, Percent, Scale } from "lucide-react";
 import type { EquityPoint, KpiMetrics, WsSnapshot } from "@/types/trading";
 
@@ -15,7 +16,7 @@ const fmt = (v: number, digits = 2, suffix = "") =>
 const fmtUsd = (v: number) =>
   `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}`;
 
-export default function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
+function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
   const { account, kelly } = snapshot;
 
   // Drawdown : pic-to-trough depuis la courbe d'équité disponible.
@@ -118,3 +119,5 @@ export default function KpiGrid({ snapshot, equityCurve, kpi }: KpiGridProps) {
     </section>
   );
 }
+
+export default memo(KpiGrid);
