@@ -518,14 +518,14 @@ class Engine:
             f"Source: {signal.source}"
         )
 
-        # 4. Filtre ML — timeout 10s (le modèle LSTM peut être lent sur CPU)
+        # 4. Filtre ML — timeout 20s (le modèle LSTM peut être lent sur CPU)
         try:
             validated_signal = await asyncio.wait_for(
                 asyncio.to_thread(self.ml_predictor.filter_signal, signal, df),
-                timeout=10.0
+                timeout=20.0
             )
         except asyncio.TimeoutError:
-            logging.warning(f"[Engine] ⏱️ Timeout ML (10s) sur {symbol} — signal ignoré ce cycle.")
+            logging.warning(f"[Engine] ⏱️ Timeout ML (20s) sur {symbol} — signal ignoré ce cycle.")
             return
         if not validated_signal:
             logging.info(f"[Engine] 🤖 Signal {signal.direction.name} {symbol} rejeté par ML.")
@@ -552,14 +552,14 @@ class Engine:
 
         pip_size = StrategyBase.get_pip_size(symbol)
         
-        # Récupération du spread en temps réel et contraintes de volume (offload MT5 → timeout 4s)
+        # Récupération du spread en temps réel et contraintes de volume (offload MT5 → timeout 8s)
         try:
             sym_info = await asyncio.wait_for(
                 asyncio.to_thread(self.connector.get_symbol_info, symbol),
-                timeout=4.0
+                timeout=8.0
             )
         except asyncio.TimeoutError:
-            logging.warning(f"[Engine] ⏱️ Timeout (4s) sur get_symbol_info({symbol}) — valeurs par défaut de spread/volumes.")
+            logging.warning(f"[Engine] ⏱️ Timeout (8s) sur get_symbol_info({symbol}) — valeurs par défaut de spread/volumes.")
             sym_info = None
         except Exception as e:
             logging.warning(f"[Engine] Erreur get_symbol_info({symbol}): {e}")
@@ -577,7 +577,7 @@ class Engine:
             max_vol = getattr(sym_info, 'volume_max', 100.0)
             vol_step = getattr(sym_info, 'volume_step', 0.01)
 
-        # Offload SQLAlchemy queries to a background thread — timeout 4s strict
+        # Offload SQLAlchemy queries to a background thread — timeout 10s strict
         try:
             is_valid = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -587,10 +587,10 @@ class Engine:
                     current_spread_pips,
                     self.state_manager.positions
                 ),
-                timeout=4.0
+                timeout=10.0
             )
         except asyncio.TimeoutError:
-            logging.warning(f"[Engine] ⏱️ Timeout PreTradeValidator (4s) sur {symbol} — signal ignoré.")
+            logging.warning(f"[Engine] ⏱️ Timeout PreTradeValidator (10s) sur {symbol} — signal ignoré.")
             execution_metrics.record_pretrade_rejection("VALIDATOR_TIMEOUT")
             return
         if not is_valid:
@@ -613,7 +613,7 @@ class Engine:
         except ImportError:
             pass
 
-        # SQLAlchemy offloaded to thread — timeout 4s strict
+        # SQLAlchemy offloaded to thread — timeout 8s strict
         try:
             volume = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -626,10 +626,11 @@ class Engine:
                     max_vol,
                     vol_step
                 ),
-                timeout=4.0
+                timeout=8.0
             )
         except asyncio.TimeoutError:
-            logging.warning(f"[Engine] ⏱️ Timeout (4s) sur compute_volume({symbol}) — signal ignoré.")
+            logging.warning(f"[Engine] ⏱️ Timeout (8s) sur compute_volume({symbol}) — signal ignoré.")
+            execution_metrics.record_pretrade_rejection("VOLUME_TIMEOUT")
             return
 
         # 7. Convertir SL/TP pips → prix absolus pour MT5
