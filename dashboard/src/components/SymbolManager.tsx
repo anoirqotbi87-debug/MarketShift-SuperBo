@@ -5,17 +5,12 @@ import {
   AlertTriangle,
   Check,
   CheckCircle2,
-  DollarSign,
   Filter,
-  Flame,
   Globe,
   Layers,
   Power,
-  RefreshCw,
   Search,
   ShieldAlert,
-  Sliders,
-  TrendingUp,
   Zap,
 } from "lucide-react";
 

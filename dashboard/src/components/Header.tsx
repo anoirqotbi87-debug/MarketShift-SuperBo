@@ -5,7 +5,6 @@ import {
   Activity,
   Ban,
   BookOpen,
-  Check,
   ChevronDown,
   CircleOff,
   ExternalLink,

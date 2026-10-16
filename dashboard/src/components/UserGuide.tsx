@@ -19,7 +19,6 @@ import {
   Newspaper,
   Radio,
   Search,
-  Server,
   Settings2,
   ShieldAlert,
   ShieldCheck,
