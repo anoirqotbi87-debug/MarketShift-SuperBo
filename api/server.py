@@ -1598,8 +1598,60 @@ async def run_auto_optimizer(
 @app.get("/optimize/status/{job_id}")
 def get_optimization_status(job_id: str):
     from optimization.auto_optimizer import optimizer_manager
-    status = optimizer_manager.get_job_status(job_id)
-    return status
+    raw = optimizer_manager.get_job_status(job_id)
+    if not isinstance(raw, dict):
+        return {"status": "not_found", "progress": 0, "results": []}
+
+    status_copy = dict(raw)
+    result_data = status_copy.get("result") or {}
+    grid_results = result_data.get("gridResults") or status_copy.get("results") or []
+    best_params = result_data.get("bestParams") or status_copy.get("best_params") or {}
+    best_report = result_data.get("bestReport") or status_copy.get("best_report") or {}
+
+    formatted_results = []
+    for i, r in enumerate(grid_results):
+        conf = float(r.get("confThreshold", r.get("ml_threshold", 60)))
+        sl_m = float(r.get("slMult", r.get("sl_multiplier", 1.5)))
+        wr = float(r.get("winRate", r.get("win_rate", 50)))
+        pf = float(r.get("profitFactor", r.get("profit_factor", 1.2)))
+        dd = float(r.get("maxDrawdownPct", r.get("max_drawdown", 5)))
+        sharpe = float(r.get("sharpeRatio", r.get("sharpe_ratio", 1.0)))
+        np_pnl = float(r.get("netProfit", r.get("net_profit", 0.0)))
+        trades = int(r.get("totalTrades", r.get("trades", 20)))
+
+        formatted_results.append({
+            "rank": i + 1,
+            "sl_multiplier": sl_m,
+            "slMult": sl_m,
+            "ml_threshold": conf / 100.0 if conf > 1 else conf,
+            "confThreshold": conf,
+            "kelly_fraction": float(r.get("kelly_fraction", 0.25)),
+            "smc_weight": float(r.get("smc_weight", 0.5)),
+            "amd_weight": float(r.get("amd_weight", 0.5)),
+            "win_rate": wr / 100.0 if wr > 1 else wr,
+            "winRate": wr,
+            "profit_factor": pf,
+            "profitFactor": pf,
+            "max_drawdown": dd / 100.0 if dd > 1 else dd,
+            "maxDrawdownPct": dd,
+            "sharpe_ratio": sharpe,
+            "sharpeRatio": sharpe,
+            "net_profit": np_pnl,
+            "netProfit": np_pnl,
+            "trades": trades,
+            "totalTrades": trades,
+        })
+
+    formatted_results.sort(key=lambda x: x["sharpeRatio"], reverse=True)
+    for idx, item in enumerate(formatted_results):
+        item["rank"] = idx + 1
+
+    status_copy["results"] = formatted_results
+    status_copy["best_params"] = best_params
+    status_copy["bestParams"] = best_params
+    status_copy["best_report"] = best_report
+    status_copy["bestReport"] = best_report
+    return status_copy
 
 
 @app.get("/equity-curve")
