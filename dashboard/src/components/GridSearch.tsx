@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BarChart2,
+  CheckCircle2,
   FlaskConical,
   Loader2,
   Play,
@@ -136,6 +137,7 @@ export default function GridSearch() {
   const [mode, setMode] = useState<"idle" | "backend" | "simulated" | "cached">("idle");
   const [applyMsg, setApplyMsg] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [appliedRank, setAppliedRank] = useState<number | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -269,15 +271,17 @@ export default function GridSearch() {
         symbol: config.symbol,
       });
       if (res?.error || !res) {
-        setApplyMsg("Backend injoignable — aucun changement appliqué.");
+        setApplyMsg(res?.error ? `❌ Erreur : ${res.error}` : "⚠️ Backend injoignable — aucun changement appliqué.");
       } else {
-        setApplyMsg(`✅ Appliqué au bot (.env) : SL×${sl}, seuil confiance ML ${Math.round(conf * 100)}% pour ${config.symbol}.`);
+        setAppliedRank(row.rank);
+        const detailMsg = res.message || `Appliqué au bot (.env) : SL×${sl}, seuil confiance ML ${Math.round(conf * 100)}% pour ${config.symbol}.`;
+        setApplyMsg(`✅ ${detailMsg}`);
       }
-    } catch {
-      setApplyMsg("Erreur lors de l'enregistrement des paramètres.");
+    } catch (err: any) {
+      setApplyMsg(`❌ Erreur lors de l'enregistrement des paramètres : ${err?.message ?? "Inconnue"}`);
     } finally {
       setApplying(false);
-      setTimeout(() => setApplyMsg(null), 5000);
+      setTimeout(() => setApplyMsg(null), 8000);
     }
   };
 
@@ -540,12 +544,35 @@ export default function GridSearch() {
                     type="button"
                     onClick={() => applyToProduction(bestRow)}
                     disabled={applying}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-500 disabled:opacity-60 shadow-lg shadow-emerald-950/40 shrink-0 self-start sm:self-auto"
+                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition shadow-lg shrink-0 self-start sm:self-auto ${
+                      appliedRank === bestRow.rank
+                        ? "border border-emerald-500/60 bg-emerald-500/20 text-emerald-200"
+                        : "bg-emerald-600 text-white hover:bg-emerald-500 shadow-emerald-950/40"
+                    } disabled:opacity-60`}
                   >
-                    {applying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-                    <span>Appliquer au Bot (.env)</span>
+                    {applying ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : appliedRank === bestRow.rank ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    ) : (
+                      <Rocket className="h-4 w-4" />
+                    )}
+                    <span>
+                      {applying
+                        ? "Enregistrement..."
+                        : appliedRank === bestRow.rank
+                        ? "✓ Appliqué au bot & .env !"
+                        : "Appliquer au Bot (.env)"}
+                    </span>
                   </button>
                 </div>
+
+                {applyMsg && (
+                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-950/50 px-3 py-2 text-xs text-emerald-200 shadow">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <span className="font-medium">{applyMsg}</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -604,10 +631,22 @@ export default function GridSearch() {
                             type="button"
                             onClick={() => applyToProduction(r)}
                             disabled={applying}
-                            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-semibold text-zinc-200 transition hover:border-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-300"
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold transition ${
+                              appliedRank === r.rank
+                                ? "border-emerald-500/70 bg-emerald-500/20 text-emerald-300"
+                                : "border-zinc-700 bg-zinc-800 text-zinc-200 hover:border-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-300"
+                            }`}
                             title="Appliquer cette ligne à la configuration"
                           >
-                            <Rocket className="h-3 w-3" /> Appliquer
+                            {appliedRank === r.rank ? (
+                              <>
+                                <CheckCircle2 className="h-3 w-3 text-emerald-400" /> Appliqué
+                              </>
+                            ) : (
+                              <>
+                                <Rocket className="h-3 w-3" /> Appliquer
+                              </>
+                            )}
                           </button>
                         </td>
                       </tr>
@@ -625,13 +664,16 @@ export default function GridSearch() {
                 </p>
                 <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
                   {heatRows.map((r) => {
+                    const isApplied = appliedRank === r.rank;
                     const isTop1 = r.rank === 1;
                     const bg =
-                      isTop1
-                        ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-200"
-                        : r.rank <= 3
-                          ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
-                          : "border-zinc-800 bg-zinc-900 text-zinc-300";
+                      isApplied
+                        ? "border-emerald-400 bg-emerald-500/25 text-emerald-200 ring-1 ring-emerald-500/50"
+                        : isTop1
+                          ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-200"
+                          : r.rank <= 3
+                            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-200"
+                            : "border-zinc-800 bg-zinc-900 text-zinc-300";
                     return (
                       <div
                         key={`heat-${r.rank}`}
@@ -640,7 +682,7 @@ export default function GridSearch() {
                         title="Cliquer pour appliquer cette configuration"
                       >
                         <div className="flex items-center justify-between text-[10px]">
-                          <span className="font-bold">#{r.rank}</span>
+                          <span className="font-bold">{isApplied ? "✓ #" + r.rank : "#" + r.rank}</span>
                           <span className="text-zinc-400">SL {r.params.sl_multiplier?.toFixed(1)}x</span>
                         </div>
                         <p className="mt-1 font-semibold">

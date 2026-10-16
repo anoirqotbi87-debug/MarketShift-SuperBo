@@ -1211,43 +1211,57 @@ def apply_optimal_settings(
     sl_key = f"ATR_SL_MULTIPLIER_{payload.symbol}" if payload.symbol else "ATR_SL_MULTIPLIER"
     conf_key = f"ML_CONFIDENCE_THRESHOLD_{payload.symbol}" if payload.symbol else "ML_CONFIDENCE_THRESHOLD"
 
+    env_updates = {
+        sl_key: str(payload.slMult),
+        conf_key: str(conf_val),
+        "ATR_SL_MULTIPLIER": str(payload.slMult),
+        "ML_CONFIDENCE_THRESHOLD": str(conf_val),
+    }
+
     # Mise à jour atomique et thread-safe du fichier .env
     try:
-        atomic_update_env({
-            sl_key: str(payload.slMult),
-            conf_key: str(conf_val)
-        }, env_path=".env")
+        atomic_update_env(env_updates, env_path=".env")
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"Échec de l'écriture atomique dans .env : {e}"
         )
-        
+
     # Reload OS env vars for runtime
     os.environ[sl_key] = str(payload.slMult)
     os.environ[conf_key] = str(conf_val)
-    
+    os.environ["ATR_SL_MULTIPLIER"] = str(payload.slMult)
+    os.environ["ML_CONFIDENCE_THRESHOLD"] = str(conf_val)
+
+    # Mise à jour des paramètres runtime globaux pour répercussion immédiate dans l'UI
     global _runtime_settings
-    if not payload.symbol:
-        _runtime_settings.sl_multiplier = payload.slMult
-        _runtime_settings.ml_confidence_threshold = conf_val
-    
+    _runtime_settings.sl_multiplier = payload.slMult
+    _runtime_settings.ml_confidence_threshold = conf_val
+
+    # Mise à jour en mémoire du moteur et des stratégies actives
     if _engine:
+        try:
+            if hasattr(_engine, "ml_predictor") and _engine.ml_predictor:
+                _engine.ml_predictor.set_confidence_threshold(conf_val)
+        except Exception as e:
+            logging.warning(f"[API] Impossible d'appliquer le seuil au MLPredictor: {e}")
+
         for symbol, strategies in getattr(_engine, '_symbol_strategies', {}).items():
             if payload.symbol and symbol != payload.symbol:
                 continue
-            
-            # Update ML Predictor if possible (requires changes in MLPredictor to handle per-symbol, but we set it globally if no symbol, or fallback)
-            if not payload.symbol:
-                _engine.ml_predictor.set_confidence_threshold(conf_val)
-                
             for s in strategies:
                 s.sl_multiplier = payload.slMult
-                s.ml_confidence_threshold = conf_val # Assuming strategy respects it now
-                
+                s.ml_confidence_threshold = conf_val
+
     symbol_log = payload.symbol if payload.symbol else "Global"
     logging.info(f"[API] Opti Settings appliqués [{symbol_log}] : SL={payload.slMult}x, Conf={conf_val}")
-    return {"success": True, "message": f"Paramètres appliqués pour {symbol_log} !"}
+    return {
+        "success": True,
+        "message": f"Paramètres appliqués avec succès pour {symbol_log} (SL={payload.slMult}x, Seuil IA={int(conf_val*100)}%) !",
+        "sl_multiplier": payload.slMult,
+        "ml_confidence_threshold": conf_val,
+        "symbol": symbol_log
+    }
 
 @app.post("/settings")
 def update_settings(payload: SettingsPayload, api_key: str = Depends(verify_api_key)):
