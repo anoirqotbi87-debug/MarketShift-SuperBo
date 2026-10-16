@@ -1,13 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BrainCircuit, ChevronDown, ChevronUp, Cpu, Terminal } from "lucide-react";
-import type { EngineLog, LogLevel, MlStats, SignalData } from "@/types/trading";
+import { BrainCircuit, ChevronDown, ChevronUp, Cpu, Shield, Terminal } from "lucide-react";
+import type { EngineLog, ExecutionMetrics, LogLevel, MlStats, SignalData } from "@/types/trading";
 
 interface TelemetryConsoleProps {
   logs: EngineLog[];
   signals: Record<string, SignalData>;
   ml: MlStats;
+  executionMetrics?: ExecutionMetrics;
 }
 
 const LEVEL_STYLES: Record<LogLevel, string> = {
@@ -31,7 +32,7 @@ const fmtTime = (t: string) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
-export default function TelemetryConsole({ logs, signals, ml }: TelemetryConsoleProps) {
+export default function TelemetryConsole({ logs, signals, ml, executionMetrics }: TelemetryConsoleProps) {
   const [levelFilter, setLevelFilter] = useState<LogLevel | "ALL">("ALL");
   const [collapsed, setCollapsed] = useState(false);
 
@@ -48,6 +49,7 @@ export default function TelemetryConsole({ logs, signals, ml }: TelemetryConsole
   );
 
   const nbErrors = (logs ?? []).filter((l) => l.level === "ERROR").length;
+  const pretradeTotal = executionMetrics?.pretrade_rejections?.total ?? 0;
 
   return (
     <section className="card flex h-full flex-col overflow-hidden">
@@ -82,6 +84,19 @@ export default function TelemetryConsole({ logs, signals, ml }: TelemetryConsole
             <Cpu className="mr-1 inline h-3.5 w-3.5" />
             {Object.keys(signals || {}).length} symboles suivis
           </span>
+          {executionMetrics && (
+            <span
+              title={`Fill Rate: ${executionMetrics.fill_rate_pct.toFixed(1)}% | Latence: ${executionMetrics.last_routing_latency_ms}ms`}
+              className={`inline-flex items-center gap-1 rounded-md px-2 py-1 ${
+                pretradeTotal > 0
+                  ? "bg-purple-500/10 text-purple-300 border border-purple-500/20"
+                  : "bg-zinc-800/60 text-zinc-400"
+              }`}
+            >
+              <Shield className="h-3.5 w-3.5 text-purple-400" />
+              {pretradeTotal} rejet(s) pré-trade
+            </span>
+          )}
           {nbErrors > 0 && (
             <span className="rounded-md bg-rose-500/10 px-2 py-1 text-rose-400">
               {nbErrors} erreur(s)

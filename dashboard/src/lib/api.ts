@@ -9,6 +9,7 @@ import type {
   BrokerTestResult,
   ConnectionProfile,
   EquityPoint,
+  ExecutionMetrics,
   HistoryBar,
   KellyApiResponse,
   KpiMetrics,
@@ -190,6 +191,16 @@ async function requestWithTimeout<T>(
 
 export async function fetchServerStatus(): Promise<ServerStatus | null> {
   return request<ServerStatus>("/status");
+}
+
+export async function fetchExecutionMetrics(): Promise<ExecutionMetrics | null> {
+  return request<ExecutionMetrics>("/execution-metrics");
+}
+
+export async function resetExecutionMetrics(): Promise<{ status: string; message: string } | null> {
+  return request<{ status: string; message: string }>("/execution-metrics/reset", {
+    method: "POST",
+  });
 }
 
 export async function fetchPositions(): Promise<RestPosition[]> {

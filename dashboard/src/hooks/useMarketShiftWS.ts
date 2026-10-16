@@ -40,6 +40,18 @@ const DEFAULT_SNAPSHOT: WsSnapshot = {
   logs: [],
   killSwitch: false,
   isPaused: false,
+  executionMetrics: {
+    avg_routing_latency_ms: 0,
+    last_routing_latency_ms: 0,
+    fill_rate_pct: 100,
+    avg_slippage_pips: 0,
+    orders_attempted: 0,
+    orders_executed: 0,
+    pretrade_rejections: {
+      total: 0,
+      by_reason: {},
+    },
+  },
 };
 
 export function useMarketShiftWS() {

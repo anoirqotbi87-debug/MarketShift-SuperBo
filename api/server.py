@@ -362,6 +362,7 @@ def _build_ws_snapshot() -> dict:
         "htfTimeframe": _runtime_settings.htf_timeframe,
         "activeSymbols": list(_engine.symbols) if _engine and hasattr(_engine, 'symbols') else _runtime_settings.active_symbols,
         "availableSymbols": list(_engine.available_symbols) if _engine and hasattr(_engine, 'available_symbols') else _runtime_settings.available_symbols,
+        "executionMetrics": execution_metrics.get_metrics(),
     }
 
 
@@ -425,6 +426,19 @@ def get_status():
         "high_water_mark": cb_metrics.get("high_water_mark", 0.0),
         "execution_metrics": execution_metrics.get_metrics(),
     }
+
+
+@app.get("/execution-metrics")
+def get_execution_metrics():
+    """Retourne les métriques détaillées de qualité d'exécution et rejets pré-trade (MiFID II / RTS 6)."""
+    return execution_metrics.get_metrics()
+
+
+@app.post("/execution-metrics/reset")
+def reset_execution_metrics(api_key: str = Depends(verify_api_key)):
+    """Réinitialise les métriques d'exécution."""
+    execution_metrics.reset()
+    return {"status": "success", "message": "Métriques d'exécution réinitialisées"}
 
 
 class ControlCommand(BaseModel):

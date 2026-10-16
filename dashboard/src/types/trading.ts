@@ -102,6 +102,21 @@ export interface EngineLog {
   message: string;
 }
 
+export interface PreTradeRejections {
+  total: number;
+  by_reason: Record<string, number>;
+}
+
+export interface ExecutionMetrics {
+  avg_routing_latency_ms: number;
+  last_routing_latency_ms: number;
+  fill_rate_pct: number;
+  avg_slippage_pips: number;
+  orders_attempted: number;
+  orders_executed: number;
+  pretrade_rejections: PreTradeRejections;
+}
+
 export interface WsSnapshot {
   type: string;
   timestamp: string;
@@ -120,6 +135,7 @@ export interface WsSnapshot {
   htfTimeframe?: string;
   activeSymbols?: string[];
   availableSymbols?: string[];
+  executionMetrics?: ExecutionMetrics;
 }
 
 
@@ -153,6 +169,11 @@ export interface ServerStatus {
   account: AccountInfo | null;
   positions_count: number;
   symbols: string[];
+  circuit_breaker?: Record<string, unknown>;
+  daily_start_balance?: number;
+  current_daily_pnl_pct?: number;
+  high_water_mark?: number;
+  execution_metrics?: ExecutionMetrics;
 }
 
 /** Réponse de l'API REST pour les positions (mêmes champs que le WS). */

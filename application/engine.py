@@ -533,18 +533,21 @@ class Engine:
 
         # 5. Sanity Check RTS 6 (PreTradeValidator)
         if not self.state_manager.account:
+            execution_metrics.record_pretrade_rejection("ACCOUNT_UNAVAILABLE")
             return
 
         # --- Bloqueur de Pyramiding (Account Blow-up Protection) ---
         has_open_position = any(p.symbol == symbol for p in self.state_manager.positions)
         if has_open_position:
             logging.info(f"[Engine] 🛡️ Rejet: Position déjà ouverte sur {symbol}. Pyramiding interdit.")
+            execution_metrics.record_pretrade_rejection("PYRAMIDING_BLOCKED")
             return
             
         # --- Limite d'Exposition Globale (Max 2 trades simultanés) ---
         bot_positions = [p for p in self.state_manager.positions if getattr(p, 'magic', 0) != 0]
         if len(bot_positions) >= 2:
             logging.info(f"[Engine] 🛡️ Rejet: Limite d'exposition globale atteinte (Max 2 trades simultanés).")
+            execution_metrics.record_pretrade_rejection("MAX_GLOBAL_EXPOSURE")
             return
 
         pip_size = StrategyBase.get_pip_size(symbol)
@@ -588,6 +591,7 @@ class Engine:
             )
         except asyncio.TimeoutError:
             logging.warning(f"[Engine] ⏱️ Timeout PreTradeValidator (4s) sur {symbol} — signal ignoré.")
+            execution_metrics.record_pretrade_rejection("VALIDATOR_TIMEOUT")
             return
         if not is_valid:
             # Le Validator gère lui-même ses propres logs d'erreurs détaillés
@@ -599,6 +603,7 @@ class Engine:
                 f"[Engine] 🚫 Rejet: Le Spread dévore le SL "
                 f"(SL={validated_signal.sl_pips:.1f} pips | Spread={current_spread_pips:.1f} pips). Suicide mathématique évité."
             )
+            execution_metrics.record_pretrade_rejection("SPREAD_EXCEEDS_SL")
             return
 
         # 6. Injection Dynamique du Risque et Calcul du Volume

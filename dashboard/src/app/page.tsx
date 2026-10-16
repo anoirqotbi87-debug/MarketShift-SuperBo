@@ -130,6 +130,7 @@ export default function DashboardPage() {
                       logs={snapshot.logs ?? []}
                       signals={snapshot.signals ?? {}}
                       ml={snapshot.ml ?? { trained: false, accuracy: 0, sampleCount: 0, lastTrained: "", featureImportances: [] }}
+                      executionMetrics={snapshot.executionMetrics}
                     />
                   </div>
                 </div>
