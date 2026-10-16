@@ -18,6 +18,7 @@ import RiskMetricsPanel from "@/components/RiskMetricsPanel";
 import KellySizer from "@/components/KellySizer";
 import PriceAlerts from "@/components/PriceAlerts";
 import UserGuide from "@/components/UserGuide";
+import SymbolManager from "@/components/SymbolManager";
 import Sidebar, { type DashboardView } from "@/components/Sidebar";
 import { fetchEquityCurve, fetchKpiMetrics } from "@/lib/api";
 import { useMarketShiftWS } from "@/hooks/useMarketShiftWS";
@@ -27,6 +28,7 @@ const POLL_MS = 10000;
 
 const VIEW_TITLES: Record<DashboardView, string> = {
   live: "LIVE MONITORING",
+  symbols: "UNIVERS SYMBOLES & ACTIFS",
   analytics: "ANALYTICS",
   grid: "GRID SEARCH",
   backtest: "BACKTEST STUDIO",
@@ -104,6 +106,7 @@ export default function DashboardPage() {
           onReconnect={reconnect}
           onOpenMenu={() => setMobileMenuOpen(true)}
           onOpenGuide={() => setView("guide")}
+          onOpenSymbols={() => setView("symbols")}
           title={VIEW_TITLES[view]}
         />
 
@@ -134,6 +137,8 @@ export default function DashboardPage() {
                 <ActivePositions positions={snapshot.positions ?? []} />
               </>
             )}
+
+            {view === "symbols" && <SymbolManager snapshot={snapshot} />}
 
             {view === "grid" && <GridSearch />}
 

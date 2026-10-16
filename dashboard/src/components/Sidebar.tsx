@@ -6,6 +6,7 @@ import {
   BookOpen,
   BrainCircuit,
   GaugeCircle,
+  Globe,
   Landmark,
   LineChart,
   PanelLeftClose,
@@ -18,6 +19,7 @@ import {
 
 export type DashboardView =
   | "live"
+  | "symbols"
   | "grid"
   | "backtest"
   | "config"
@@ -39,6 +41,7 @@ interface SidebarProps {
 
 const NAV_ITEMS: Array<{ id: DashboardView; label: string; icon: typeof Activity }> = [
   { id: "live", label: "Live Monitoring", icon: Activity },
+  { id: "symbols", label: "Univers Symboles", icon: Globe },
   { id: "analytics", label: "Analytics", icon: LineChart },
   { id: "grid", label: "Grid Search", icon: GaugeCircle },
   { id: "backtest", label: "Backtest Studio", icon: BarChart3 },

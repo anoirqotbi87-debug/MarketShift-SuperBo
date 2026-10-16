@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ChevronRight,
   GaugeCircle,
+  Globe,
   HelpCircle,
   Landmark,
   Layers,
@@ -39,7 +40,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
 
   const sections = [
     { id: "quickstart" as const, label: "1. Démarrage Rapide", icon: Zap },
-    { id: "modules" as const, label: "2. Guide des Modules (9 vues)", icon: Activity },
+    { id: "modules" as const, label: "2. Guide des Modules (10 vues)", icon: Activity },
     { id: "risk" as const, label: "3. Sécurité & Risque", icon: ShieldCheck },
     { id: "faq" as const, label: "4. FAQ & Dépannage", icon: HelpCircle },
   ];
@@ -204,12 +205,26 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
                 "Télémétrie IA : Affiche les calculs du consensus, les détections SMC/AMD et les décisions de l'IA (accord ou Veto).",
                 "Positions Ouvertes : Liste chaque position avec SL, TP, P&L flottant en USD et bouton de clôture rapide d'urgence.",
                 "Header Status : Badge en direct 'MACRO LIBRE' ou 'EMBARGO NEWS [PAIRE]' indiquant l'état du filtre macroéconomique.",
+                "Menu Déroulant Univers : Bouton compact 'Univers : X/21 Actifs' pour filtrer et basculer instantanément les actifs sans encombrer la barre supérieure.",
                 "Bouton d'Urgence : Déclenche le Kill Switch immédiat (fermeture de tous les ordres et verrouillage des entrées).",
               ],
             },
             {
+              id: "symbols" as DashboardView,
+              title: "2. Univers Symboles & Actifs (Gestion de Portefeuille)",
+              icon: Globe,
+              desc: "Gérez votre univers de trading complet parmi les 21 actifs supportés avec filtres, recherche et switches réactifs.",
+              details: [
+                "Vue Dédiée et Menu Déroulant Header : Accédez à vos 21 actifs soit depuis la barre supérieure via le menu compact 'Univers : X/21 Actifs', soit via l'onglet dédié.",
+                "Activation Instantanée Sans Rechargement : Cliquez sur le switch interactif d'un actif pour l'activer ou le désactiver immédiatement avec mise à jour optimiste et persistance atomique dans le fichier .env.",
+                "Filtres par Catégorie : Onglets rapides Forex Majeurs, Forex Croisés, Matières Premières, Indices Boursiers et Cryptomonnaies.",
+                "Actions Groupées : Boutons 'Tout Activer (21)', 'Tout Désactiver' et 'Activer la catégorie' pour adapter rapidement votre stratégie à l'ouverture des marchés.",
+                "Indicateur d'Embargo ForexFactory : Tout symbole temporairement bloqué par une annonce High Impact affiche un badge clignotant 'EMBARGO NEWS'.",
+              ],
+            },
+            {
               id: "analytics" as DashboardView,
-              title: "2. Analytics & Calendrier Macro (Analytique Avancée)",
+              title: "3. Analytics & Calendrier Macro (Analytique Avancée)",
               icon: LineChart,
               desc: "Fournit une radiographie complète du marché et la surveillance des annonces économiques ForexFactory.",
               details: [
@@ -223,7 +238,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "ml" as DashboardView,
-              title: "3. ML Engine (Intelligence Artificielle & Modèles)",
+              title: "4. ML Engine (Intelligence Artificielle & Modèles)",
               icon: BrainCircuit,
               desc: "Supervise la précision, la latence et les inférences de l'intelligence artificielle.",
               details: [
@@ -236,7 +251,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "mt5" as DashboardView,
-              title: "4. MT5 Bridge (Passerelle MetaTrader 5)",
+              title: "5. MT5 Bridge (Passerelle MetaTrader 5)",
               icon: Radio,
               desc: "Diagnostique la liaison matérielle entre le bot Python et le terminal MetaTrader 5.",
               details: [
@@ -248,7 +263,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "brokers" as DashboardView,
-              title: "5. Comptes Broker (Gestion Multi-Courtiers)",
+              title: "6. Comptes Broker (Gestion Multi-Courtiers)",
               icon: Landmark,
               desc: "Basculez facilement entre différents comptes de trading et lancez le WebTrader.",
               details: [
@@ -260,7 +275,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "config" as DashboardView,
-              title: "6. Stratégies, Profils & MTF (Configuration Dynamique)",
+              title: "7. Stratégies, Profils & MTF (Configuration Dynamique)",
               icon: Settings2,
               desc: "Sélectionnez vos profils de trading, ajustez les timeframes MTF et modifiez les paramètres sans redémarrer le bot.",
               details: [
@@ -276,7 +291,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "grid" as DashboardView,
-              title: "7. Grid Search (Optimiseur d'Hyperparamètres)",
+              title: "8. Grid Search (Optimiseur d'Hyperparamètres)",
               icon: GaugeCircle,
               desc: "Explorez des milliers de combinaisons de paramètres pour maximiser votre ratio de Sharpe.",
               details: [
@@ -288,7 +303,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "backtest" as DashboardView,
-              title: "8. Backtest Studio (Simulation Historique)",
+              title: "9. Backtest Studio (Simulation Historique)",
               icon: BarChart3,
               desc: "Testez vos stratégies sur des données passées avant de les déployer avec de l'argent réel.",
               details: [
@@ -300,7 +315,7 @@ export default function UserGuide({ onNavigate }: UserGuideProps) {
             },
             {
               id: "logs" as DashboardView,
-              title: "9. Terminal Logs (Journal d'Événements Live)",
+              title: "10. Terminal Logs (Journal d'Événements Live)",
               icon: SquareTerminal,
               desc: "Console de développement affichant jusqu'à 200 logs avec recherche instantanée.",
               details: [

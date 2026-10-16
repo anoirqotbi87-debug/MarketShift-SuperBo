@@ -13,7 +13,7 @@ import {
   TrendingUp,
   Zap,
 } from "lucide-react";
-import { fetchKelly, fetchSettings, updateSettings } from "@/lib/api";
+import { fetchKelly, fetchSettings, updateSettings, toggleSymbol } from "@/lib/api";
 import type { KellyApiResponse, RuntimeSettings } from "@/types/trading";
 
 const NEWS_FILTER_KEY = "marketshift.news_filter";
@@ -273,40 +273,54 @@ export default function ConfigPanel() {
     }));
   };
 
-  const toggleSymbolConfig = (sym: string) => {
-    setSettings((prev) => {
-      const current = prev.active_symbols || [];
-      const updated = current.includes(sym)
-        ? current.filter((s) => s !== sym)
-        : [...current, sym];
-      return {
-        ...prev,
-        active_symbols: updated,
-      };
-    });
-  };
-
-  const setAllSymbols = (enable: boolean) => {
+  const toggleSymbolConfig = async (sym: string) => {
+    const current = settings.active_symbols || [];
+    const isNowActive = !current.includes(sym);
+    const updated = isNowActive
+      ? [...current, sym]
+      : current.filter((s) => s !== sym);
     setSettings((prev) => ({
       ...prev,
-      active_symbols: enable ? [...(prev.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)] : [],
+      active_symbols: updated,
     }));
+    try {
+      await toggleSymbol(sym, isNowActive);
+    } catch {
+      // ignore
+    }
   };
 
-  const toggleCategorySymbols = (cat: string, enable: boolean) => {
-    setSettings((prev) => {
-      const avail = prev.available_symbols || DEFAULT_AVAILABLE_SYMBOLS;
-      const catSyms = avail.filter((s) => cat === "Tous" || getSymbolMeta(s).category === cat);
-      const current = new Set(prev.active_symbols || []);
-      catSyms.forEach((s) => {
-        if (enable) current.add(s);
-        else current.delete(s);
-      });
-      return {
-        ...prev,
-        active_symbols: Array.from(current),
-      };
+  const setAllSymbols = async (enable: boolean) => {
+    const target = enable ? [...(settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS)] : [];
+    setSettings((prev) => ({
+      ...prev,
+      active_symbols: target,
+    }));
+    try {
+      await updateSettings({ active_symbols: target });
+    } catch {
+      // ignore
+    }
+  };
+
+  const toggleCategorySymbols = async (cat: string, enable: boolean) => {
+    const avail = settings.available_symbols || DEFAULT_AVAILABLE_SYMBOLS;
+    const catSyms = avail.filter((s) => cat === "Tous" || getSymbolMeta(s).category === cat);
+    const current = new Set(settings.active_symbols || []);
+    catSyms.forEach((s) => {
+      if (enable) current.add(s);
+      else current.delete(s);
     });
+    const updated = Array.from(current);
+    setSettings((prev) => ({
+      ...prev,
+      active_symbols: updated,
+    }));
+    try {
+      await updateSettings({ active_symbols: updated });
+    } catch {
+      // ignore
+    }
   };
 
   const save = async () => {

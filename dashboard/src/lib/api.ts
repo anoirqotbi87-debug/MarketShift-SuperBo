@@ -41,6 +41,7 @@ const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http
 const ENV_WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000/ws";
 const STORAGE_KEY = "marketshift.connection";
 const API_KEY_STORAGE_KEY = "marketshift.apikey";
+export const DEFAULT_API_KEY = "1f4e4a57fbef3922fdffa64d8849cf24ad47215372f14ffa4cba8c9a0992f4e5";
 
 export function getApiKey(): string {
   if (typeof window !== "undefined") {
@@ -53,7 +54,7 @@ export function getApiKey(): string {
       // ignore
     }
   }
-  return process.env.NEXT_PUBLIC_API_KEY || "";
+  return process.env.NEXT_PUBLIC_API_KEY || DEFAULT_API_KEY;
 }
 
 export function setApiKey(key: string): void {
