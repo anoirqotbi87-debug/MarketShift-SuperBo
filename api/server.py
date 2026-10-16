@@ -18,7 +18,7 @@ import time
 from collections import deque
 from typing import List, Optional, Any, Dict
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Security, Request, Response
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
@@ -147,6 +147,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def add_private_network_access_header(request: Request, call_next):
+    """Support de la spécification Private Network Access (PNA) W3C/Chrome pour Vercel."""
+    response: Response = await call_next(request)
+    if request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
 
 _engine: Optional[Engine] = None
 
@@ -381,7 +389,7 @@ async def startup_event():
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-async def verify_api_key(api_key_header: str = Security(api_key_header)):
+async def verify_api_key(request: Request, api_key_header: str = Security(api_key_header)):
     # Clé de secours institutionnelle par défaut du dashboard SuperBot
     fallback_key = "1f4e4a57fbef3922fdffa64d8849cf24ad47215372f14ffa4cba8c9a0992f4e5"
     valid_keys = {k for k in (Config.API_SECRET_KEY, fallback_key) if k}
@@ -392,9 +400,12 @@ async def verify_api_key(api_key_header: str = Security(api_key_header)):
     if api_key_header and api_key_header in valid_keys:
         return api_key_header
 
-    # En environnement dev ou appel local, autoriser pour fluidité du dashboard
-    if not api_key_header and Config.ENVIRONMENT.lower() in ("development", "dev", "test"):
-        return ""
+    # En environnement dev ou appel local/direct (localhost / loopback), autoriser pour fluidité du dashboard
+    client_host = request.client.host if request.client else ""
+    is_localhost = client_host in ("127.0.0.1", "localhost", "::1", "testclient")
+    is_dev = Config.ENVIRONMENT.lower() in ("development", "dev", "test")
+    if is_localhost or is_dev:
+        return api_key_header or ""
 
     raise HTTPException(
         status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
@@ -840,37 +851,45 @@ class ToggleSymbolRequest(BaseModel):
 @app.post("/symbols/toggle")
 def toggle_symbol_endpoint(req: ToggleSymbolRequest, api_key: str = Depends(verify_api_key)):
     """Active ou désactive un symbole individuel à chaud avec persistance atomique."""
-    sym = req.symbol.strip().upper()
-    if _engine:
-        _engine.toggle_symbol(sym, req.enabled)
-        active = list(_engine.symbols)
-        available = list(_engine.available_symbols)
-    else:
-        active = list(_runtime_settings.active_symbols)
-        if req.enabled and sym not in active:
-            active.append(sym)
-        elif not req.enabled and sym in active:
-            active.remove(sym)
-        _runtime_settings.active_symbols = active
-        available = list(_runtime_settings.available_symbols)
-        if sym not in available:
-            available.append(sym)
-            _runtime_settings.available_symbols = available
-
-    _runtime_settings.active_symbols = active
     try:
-        atomic_update_env({"TRADING_SYMBOLS": ",".join(active)})
-    except Exception as err:
-        logging.warning(f"[API] Erreur écriture TRADING_SYMBOLS dans .env: {err}")
+        sym = req.symbol.strip().upper()
+        if _engine:
+            _engine.toggle_symbol(sym, req.enabled)
+            active = list(_engine.symbols)
+            available = list(_engine.available_symbols)
+        else:
+            active = list(_runtime_settings.active_symbols)
+            if req.enabled and sym not in active:
+                active.append(sym)
+            elif not req.enabled and sym in active:
+                active.remove(sym)
+            _runtime_settings.active_symbols = active
+            available = list(_runtime_settings.available_symbols)
+            if sym not in available:
+                available.append(sym)
+                _runtime_settings.available_symbols = available
 
-    logging.info(f"[API] 🎛️ Symbole {sym} {'activé' if req.enabled else 'désactivé'}. Symboles actifs: {active}")
-    return {
-        "success": True,
-        "symbol": sym,
-        "enabled": req.enabled,
-        "activeSymbols": active,
-        "availableSymbols": available
-    }
+        _runtime_settings.active_symbols = active
+        try:
+            atomic_update_env({"TRADING_SYMBOLS": ",".join(active)})
+        except Exception as err:
+            logging.warning(f"[API] Erreur écriture TRADING_SYMBOLS dans .env: {err}")
+
+        logging.info(f"[API] 🎛️ Symbole {sym} {'activé' if req.enabled else 'désactivé'}. Symboles actifs: {active}")
+        return {
+            "success": True,
+            "symbol": sym,
+            "enabled": req.enabled,
+            "activeSymbols": active,
+            "availableSymbols": available
+        }
+    except Exception as e:
+        logging.error(f"[API] Erreur lors du toggle de {req.symbol}: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e),
+            "symbol": req.symbol
+        }
 
 
 @app.get("/symbols")
