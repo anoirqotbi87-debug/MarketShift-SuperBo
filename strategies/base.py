@@ -90,7 +90,7 @@ class StrategyBase(IStrategy):
 
         if atr <= 0 or pip_size <= 0:
             # Valeurs par défaut si ATR indisponible
-            return 20.0, 35.0, 0.0
+            return 25.0, 45.0, 0.0
 
         sl_pips = round((atr * self.sl_multiplier) / pip_size, 1)
         tp_pips = round((atr * self.tp_multiplier) / pip_size, 1)
@@ -100,19 +100,19 @@ class StrategyBase(IStrategy):
             sl_pips *= 3.0  # On donne 3x plus de marge au Bitcoin
             tp_pips *= 3.0
             
-        # Limites de sécurité dynamiques selon l'actif
+        # Limites de sécurité dynamiques selon l'actif pour immuniser contre le spread et le bruit
         if pip_size >= 1.0:  # Crypto (BTC, ETH, SOL) ou Indices (US30, US100, US500, GER40)
-            sl_pips = max(20.0, min(sl_pips, 5000.0))
-            tp_pips = max(40.0, min(tp_pips, 10000.0))
-        elif pip_size == 0.1: # XAUUSD / GOLD -> pips = 0.1$
-            sl_pips = max(10.0, min(sl_pips, 1000.0))
-            tp_pips = max(20.0, min(tp_pips, 2000.0))
-        elif pip_size == 0.001 or pip_size == 0.01: # JPY, SILVER, OIL
-            sl_pips = max(10.0, min(sl_pips, 500.0))
-            tp_pips = max(15.0, min(tp_pips, 1000.0))
-        else: # Forex Standard
-            sl_pips = max(15.0, min(sl_pips, 200.0))
-            tp_pips = max(20.0, min(tp_pips, 400.0))
+            sl_pips = max(50.0, min(sl_pips, 5000.0))
+            tp_pips = max(100.0, min(tp_pips, 10000.0))
+        elif pip_size == 0.1: # XAUUSD / GOLD -> pips = 0.1$ (25.0 pips = $2.50)
+            sl_pips = max(25.0, min(sl_pips, 1000.0))
+            tp_pips = max(45.0, min(tp_pips, 2000.0))
+        elif pip_size == 0.001 or pip_size == 0.01: # JPY (GBPJPY, USDJPY), SILVER, OIL
+            sl_pips = max(25.0, min(sl_pips, 500.0))
+            tp_pips = max(40.0, min(tp_pips, 1000.0))
+        else: # Forex Standard (EURUSD, GBPUSD, AUDUSD...)
+            sl_pips = max(18.0, min(sl_pips, 200.0))
+            tp_pips = max(28.0, min(tp_pips, 400.0))
 
         return sl_pips, tp_pips, atr
 

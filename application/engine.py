@@ -598,10 +598,10 @@ class Engine:
             return
 
         # --- NOUVEAU: Protection Dynamique du Spread vs Stop Loss ---
-        if validated_signal.sl_pips and (validated_signal.sl_pips < current_spread_pips * 1.5):
+        if validated_signal.sl_pips and (validated_signal.sl_pips < current_spread_pips * 2.0):
             logging.warning(
                 f"[Engine] 🚫 Rejet: Le Spread dévore le SL "
-                f"(SL={validated_signal.sl_pips:.1f} pips | Spread={current_spread_pips:.1f} pips). Suicide mathématique évité."
+                f"(SL={validated_signal.sl_pips:.1f} pips | Spread={current_spread_pips:.1f} pips). Ratio minimum 2.0x requis. Suicide mathématique évité."
             )
             execution_metrics.record_pretrade_rejection("SPREAD_EXCEEDS_SL")
             return
