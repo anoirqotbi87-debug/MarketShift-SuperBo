@@ -130,9 +130,9 @@ export default function Sidebar({
       <div className="border-t border-zinc-800/70 px-4 py-3">
         {!collapsed ? (
           <p className="font-mono text-[10px] leading-relaxed text-zinc-600">
-            MT5 · 5 symboles
+            MarketShift SuperBot
             <br />
-            v1.0 Dashboard
+            v2.0 Dashboard
           </p>
         ) : (
           <span className="mx-auto block h-1.5 w-1.5 rounded-full bg-emerald-400" />
