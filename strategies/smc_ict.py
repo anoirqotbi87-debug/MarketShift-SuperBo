@@ -111,7 +111,7 @@ class SMCStrategy(StrategyBase):
             bearish_ob = valid_bearish_obs.any()
 
             pip_size = self.get_pip_size(symbol)
-            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
+            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size, symbol=symbol)
 
             # Confluence Achat : Bullish MSS + Bullish FVG + Bullish OB
             if bullish_mss and bullish_fvg and bullish_ob:

@@ -74,7 +74,8 @@ class StrategyBase(IStrategy):
             return 0.0
 
     def compute_sl_tp_pips(self, df, pip_size: float = 0.0001,
-                           period: int = DEFAULT_ATR_PERIOD) -> Tuple[float, float, float]:
+                           period: int = DEFAULT_ATR_PERIOD,
+                           symbol: str = "") -> Tuple[float, float, float]:
         """
         Calcule les SL et TP en pips basés sur l'ATR.
 
@@ -82,6 +83,7 @@ class StrategyBase(IStrategy):
             df: DataFrame OHLCV
             pip_size: Taille d'un pip (0.0001 pour EUR/USD, 0.01 pour USD/JPY, 0.1 pour XAU/USD)
             period: Période ATR
+            symbol: Nom du symbole (optionnel, pour adaptation granulaire des planchers)
 
         Returns:
             Tuple[sl_pips, tp_pips, atr_value]
@@ -95,24 +97,33 @@ class StrategyBase(IStrategy):
         sl_pips = round((atr * self.sl_multiplier) / pip_size, 1)
         tp_pips = round((atr * self.tp_multiplier) / pip_size, 1)
 
-        # Ajustement spécifique pour les Cryptos (qui ont une volatilité extrême en intra-day)
-        if pip_size >= 1.0:
-            sl_pips *= 3.0  # On donne 3x plus de marge au Bitcoin
-            tp_pips *= 3.0
-            
+        s = symbol.upper() if symbol else ""
+
         # Limites de sécurité dynamiques selon l'actif pour immuniser contre le spread et le bruit
-        if pip_size >= 1.0:  # Crypto (BTC, ETH, SOL) ou Indices (US30, US100, US500, GER40)
-            sl_pips = max(50.0, min(sl_pips, 5000.0))
-            tp_pips = max(100.0, min(tp_pips, 10000.0))
+        # sans jamais forcer un SL disproportionné par rapport au cours réel de l'actif.
+        if any(idx in s for idx in ['US30', 'US100', 'US500', 'GER40', 'DAX', 'NAS', 'SPX', 'DJ30', 'DE40']) or (not s and pip_size >= 1.0):
+            sl_pips = max(20.0, min(sl_pips, 2000.0))
+            tp_pips = max(40.0, min(tp_pips, 4000.0))
+        elif 'BTC' in s:
+            sl_pips = max(50.0, min(sl_pips, 3000.0))
+            tp_pips = max(100.0, min(tp_pips, 6000.0))
+        elif 'ETH' in s:
+            # en unités 0.1$, 30 pips = 3.0$
+            sl_pips = max(30.0, min(sl_pips, 1500.0))
+            tp_pips = max(60.0, min(tp_pips, 3000.0))
+        elif 'SOL' in s or pip_size == 0.01:
+            # Pour Solana (pip_size = 0.01$), 30 pips = 0.30$, 500 pips = 5.0$
+            sl_pips = max(30.0, min(sl_pips, 600.0))
+            tp_pips = max(60.0, min(tp_pips, 1200.0))
         elif pip_size == 0.1: # XAUUSD / GOLD -> pips = 0.1$ (25.0 pips = $2.50)
             sl_pips = max(25.0, min(sl_pips, 1000.0))
             tp_pips = max(45.0, min(tp_pips, 2000.0))
-        elif pip_size == 0.001 or pip_size == 0.01: # JPY (GBPJPY, USDJPY), SILVER, OIL
+        elif pip_size == 0.001: # SILVER
             sl_pips = max(25.0, min(sl_pips, 500.0))
             tp_pips = max(40.0, min(tp_pips, 1000.0))
         else: # Forex Standard (EURUSD, GBPUSD, AUDUSD...)
-            sl_pips = max(18.0, min(sl_pips, 200.0))
-            tp_pips = max(28.0, min(tp_pips, 400.0))
+            sl_pips = max(15.0, min(sl_pips, 200.0))
+            tp_pips = max(25.0, min(tp_pips, 400.0))
 
         return sl_pips, tp_pips, atr
 
@@ -133,8 +144,12 @@ class StrategyBase(IStrategy):
             return 0.01     # Pétrole (USOIL, WTI)
         elif any(idx in s for idx in ['US30', 'US100', 'US500', 'GER40', 'DAX', 'NAS', 'SPX', 'DJ30', 'DE40']):
             return 1.0      # Indices boursiers (1 point)
-        elif any(c in s for c in ['BTC', 'ETH', 'SOL']):
-            return 1.0      # Cryptomonnaies (BTCUSD, ETHUSD, SOLUSD)
+        elif 'BTC' in s:
+            return 1.0      # Bitcoin (1$ de pas)
+        elif 'ETH' in s:
+            return 0.1      # Ethereum (0.10$ de pas)
+        elif 'SOL' in s:
+            return 0.01     # Solana (0.01$ = 1 centime de pas)
         else:
             return 0.0001   # Forex standard (EURUSD, GBPUSD, AUDUSD, USDCAD, USDCHF, NZDUSD, EURGBP, etc.)
 

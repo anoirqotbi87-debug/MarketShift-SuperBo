@@ -622,7 +622,7 @@ class Engine:
                     self.position_sizer.compute_volume,
                     validated_signal,
                     self.state_manager.account,
-                    self._get_pip_value(symbol, sym_info),
+                    self._get_pip_value(symbol, sym_info, pip_size),
                     validated_signal.sl_pips,
                     min_vol,
                     max_vol,
@@ -644,6 +644,36 @@ class Engine:
             pip_size=pip_size,
             df=df
         )
+
+        # 7.1 Garde-fou institutionnel de cohérence des SL/TP (Anti-Aberration & Anti-Fat-Finger)
+        try:
+            current_close = float(df.iloc[-1]['close'])
+            if current_close > 0:
+                sl_dist_pct = abs(sl_price - current_close) / current_close
+                if sl_dist_pct > 0.08:  # Si le SL est à plus de 8% du cours en M5, c'est aberrant
+                    logging.critical(
+                        f"[Engine] 🚨 REJET SL ABERRANT : {symbol} Prix={current_close}, SL={sl_price} "
+                        f"(écart={sl_dist_pct:.1%}). Ordre bloqué pour protéger le compte."
+                    )
+                    execution_metrics.record_pretrade_rejection("ABERRANT_SL_DISTANCE")
+                    return
+        except Exception as guard_err:
+            logging.warning(f"[Engine] Erreur vérification distance SL: {guard_err}")
+
+        # 7.2 Vérification du risque monétaire absolu vs équité
+        account_equity = self.state_manager.account.equity if self.state_manager.account else 0.0
+        if account_equity > 0:
+            pip_val = self._get_pip_value(symbol, sym_info, pip_size)
+            effective_sl_pips = validated_signal.sl_pips or 20.0
+            est_risk = effective_sl_pips * pip_val * volume
+            # Tolérance max absolue : 15% de l'équité pour 1 trade
+            if est_risk > max(0.50, account_equity * 0.15):
+                logging.critical(
+                    f"[Engine] 🚨 REJET RISQUE EXCESSIF : Perte potentielle {est_risk:.2f}$ "
+                    f"> 15% de l'équité ({account_equity:.2f}$). Ordre bloqué pour éviter la liquidation."
+                )
+                execution_metrics.record_pretrade_rejection("EXCESSIVE_RISK_PER_TRADE")
+                return
 
         logging.warning(
             f"[Engine] 🚀 EXÉCUTION {validated_signal.direction.name} {volume} lots "
@@ -971,9 +1001,9 @@ class Engine:
                 self.connector.modify_position(p.ticket, p.symbol, new_sl)
                 p.sl = new_sl  # Maj de l'état local
 
-    def _get_pip_value(self, symbol: str, info=None) -> float:
+    def _get_pip_value(self, symbol: str, info=None, pip_size: Optional[float] = None) -> float:
         """
-        Retourne la valeur dynamique en $ d'un 'pip' (10 points) selon MT5.
+        Retourne la valeur dynamique en $ d'un déplacement de 1 pip (selon pip_size).
         `info` (déjà récupéré via get_symbol_info) est réutilisé pour éviter tout
         second appel MT5 bloquant depuis la boucle d'événements.
         """
@@ -982,16 +1012,18 @@ class Engine:
         if not info:
             return 10.0
             
-        point = info.point
-        tick_size = info.trade_tick_size
-        tick_value = info.trade_tick_value
+        point = getattr(info, 'point', 0.0001)
+        tick_size = getattr(info, 'trade_tick_size', point) or point
+        tick_value = getattr(info, 'trade_tick_value', 1.0) or 1.0
         
+        if pip_size is None or pip_size <= 0:
+            pip_size = StrategyBase.get_pip_size(symbol)
+
         if tick_size == 0:
             return 10.0
             
-        # L'ATR_pips est basé sur une échelle de 10 points par pip.
-        # La valeur de 10 points = (10 * point / tick_size) * tick_value
-        pip_dollar_value = (10 * point / tick_size) * tick_value
+        # Valeur monétaire exacte d'un déplacement de 1 pip_size pour 1 lot standard :
+        pip_dollar_value = (pip_size / tick_size) * tick_value
         return float(pip_dollar_value)
 
     @staticmethod

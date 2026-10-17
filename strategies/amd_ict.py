@@ -102,7 +102,7 @@ class AMDStrategy(StrategyBase):
             recent_sweep_low = (recent['low'] < asian_low).any()
             
             pip_size = self.get_pip_size(symbol)
-            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
+            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size, symbol=symbol)
 
             # Filtre de confluence HTF si disponible
             htf_bullish = True

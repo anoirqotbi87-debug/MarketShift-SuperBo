@@ -1,15 +1,15 @@
 {
-  "accuracy": 0.6304304304304305,
-  "sample_count": 24971,
-  "last_trained": "2026-10-15 17:08:28",
+  "accuracy": 0.5874732079066445,
+  "sample_count": 104971,
+  "last_trained": "2026-10-17 13:00:44",
   "confusion_matrix": [
     [
-      2710,
-      853
+      9538,
+      5785
     ],
     [
-      993,
-      439
+      2876,
+      2796
     ]
   ],
   "min_accuracy_threshold": 0.55,
@@ -17,7 +17,23 @@
     "EURUSD",
     "GBPUSD",
     "USDJPY",
+    "GBPJPY",
     "GOLD",
-    "BTCUSD"
+    "BTCUSD",
+    "AUDUSD",
+    "USDCAD",
+    "USDCHF",
+    "NZDUSD",
+    "EURGBP",
+    "EURJPY",
+    "XAUUSD",
+    "SILVER",
+    "USOIL",
+    "US30",
+    "US100",
+    "US500",
+    "GER40",
+    "ETHUSD",
+    "SOLUSD"
   ]
 }
