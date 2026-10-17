@@ -113,7 +113,57 @@ class AMDStrategy(StrategyBase):
                 htf_bullish = htf_close >= htf_ema20
                 htf_bearish = htf_close <= htf_ema20
 
-            if manipulated_low and recent_sweep_low and bullish_mss and htf_bullish:
+            # --- Filtre de Dynamique & Épuisement Technique (RSI / MACD) ---
+            buy_momentum_ok = True
+            sell_momentum_ok = True
+
+            if len(self._df) >= 15:
+                try:
+                    import ta
+                    close_prices = self._df['close']
+                    rsi_series = ta.momentum.rsi(close_prices, window=14)
+                    current_rsi = rsi_series.iloc[-1]
+                    prev_rsi = rsi_series.iloc[-2] if len(rsi_series) >= 2 else current_rsi
+
+                    # Vérification MACD si historique suffisant (>= 35 barres)
+                    current_macd_diff = 0.0
+                    prev_macd_diff = 0.0
+                    has_macd = False
+                    if len(self._df) >= 35:
+                        macd_diff_series = ta.trend.macd_diff(close_prices)
+                        if not pd.isna(macd_diff_series.iloc[-1]) and not pd.isna(macd_diff_series.iloc[-2]):
+                            current_macd_diff = macd_diff_series.iloc[-1]
+                            prev_macd_diff = macd_diff_series.iloc[-2]
+                            has_macd = True
+
+                    if not pd.isna(current_rsi):
+                        # Pour un ACHAT (Sweep Asian Low) :
+                        # 1. Pas d'achat si RSI déjà en surachat extrême (> 70)
+                        if current_rsi > 70:
+                            buy_momentum_ok = False
+                        # 2. Si RSI en survente (< 35), NE PAS attraper un couteau qui tombe :
+                        # Exiger une inflexion haussière (RSI qui remonte OU histogramme MACD qui s'améliore)
+                        elif current_rsi < 35:
+                            rsi_inflection = current_rsi >= prev_rsi
+                            macd_inflection = has_macd and (current_macd_diff > prev_macd_diff)
+                            if not (rsi_inflection or macd_inflection):
+                                buy_momentum_ok = False
+
+                        # Pour une VENTE (Sweep Asian High) :
+                        # 1. Pas de vente si RSI déjà en survente extrême (< 30)
+                        if current_rsi < 30:
+                            sell_momentum_ok = False
+                        # 2. Si RSI en surachat (> 65), NE PAS vendre un breakout haussier vertical :
+                        # Exiger une inflexion baissière (RSI qui fléchit OU histogramme MACD qui fléchit)
+                        elif current_rsi > 65:
+                            rsi_inflection = current_rsi <= prev_rsi
+                            macd_inflection = has_macd and (current_macd_diff < prev_macd_diff)
+                            if not (rsi_inflection or macd_inflection):
+                                sell_momentum_ok = False
+                except Exception as e:
+                    logging.debug(f"[{self.name}] Info calcul momentum: {e}")
+
+            if manipulated_low and recent_sweep_low and bullish_mss and htf_bullish and buy_momentum_ok:
                 # AMD BULLISH Confirmé
                 logging.debug(f"[{self.name}] 🟢 AMD SETUP DETECTED (Accumulation Sweep Low) sur {symbol} | Asian Low={asian_low}")
                 return Signal(
@@ -132,7 +182,7 @@ class AMDStrategy(StrategyBase):
             bearish_mss = current_close < micro_swing_low
             recent_sweep_high = (recent['high'] > asian_high).any()
 
-            if manipulated_high and recent_sweep_high and bearish_mss and htf_bearish:
+            if manipulated_high and recent_sweep_high and bearish_mss and htf_bearish and sell_momentum_ok:
                 # AMD BEARISH Confirmé
                 logging.debug(f"[{self.name}] 🔴 AMD SETUP DETECTED (Accumulation Sweep High) sur {symbol} | Asian High={asian_high}")
                 return Signal(

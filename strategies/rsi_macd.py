@@ -59,7 +59,7 @@ class RsiMacdStrategy(StrategyBase):
 
             # Calculer SL/TP basés sur l'ATR
             pip_size = self.get_pip_size(symbol)
-            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
+            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size, symbol=symbol)
 
             # --- Régime Multiplier ---
             # Réduit la confiance de 50% si le marché est en forte tendance (ADX > 25)

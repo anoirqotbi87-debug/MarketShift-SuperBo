@@ -55,7 +55,7 @@ class EMACrossoverStrategy(StrategyBase):
 
             # Calculer SL/TP basés sur l'ATR
             pip_size = self.get_pip_size(symbol)
-            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size)
+            sl_pips, tp_pips, atr = self.compute_sl_tp_pips(self._df, pip_size, symbol=symbol)
 
             # Golden Cross (Achat)
             if current_short > current_long and prev_short <= prev_long:

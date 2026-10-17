@@ -15,6 +15,7 @@ import threading
 import asyncio
 import datetime
 from typing import Dict, Optional, Any
+import pandas as pd
 
 from application.state_manager import StateManager
 from application.position_sizer import PositionSizer
@@ -36,6 +37,8 @@ except ImportError:
 from strategies.aggregator import SignalAggregator
 from strategies.smc_ict import SMCStrategy
 from strategies.amd_ict import AMDStrategy
+from strategies.rsi_macd import RsiMacdStrategy
+from strategies.ema_crossover import EMACrossoverStrategy
 from strategies.base import StrategyBase
 
 try:
@@ -222,18 +225,30 @@ class Engine:
         )
 
     def _init_strategies_for_symbol(self, symbol: str):
-        """Initialise les stratégies SMC et AMD pour un symbole donné si absent."""
+        """Initialise l'arsenal multi-stratégies (SMC, AMD, RSI_MACD, EMA_X) pour un symbole donné."""
         if symbol not in self._symbol_strategies:
+            sl_mult = Config.get_symbol_sl_multiplier(symbol)
+            tp_mult = Config.get_symbol_tp_multiplier(symbol)
             strategies = [
                 SMCStrategy(
                     name=f"SMC_{symbol}", weight=2.0,
-                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
-                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
+                    sl_multiplier=sl_mult,
+                    tp_multiplier=tp_mult
                 ),
                 AMDStrategy(
-                    name=f"AMD_{symbol}", weight=2.5,
-                    sl_multiplier=Config.get_symbol_sl_multiplier(symbol),
-                    tp_multiplier=Config.get_symbol_tp_multiplier(symbol)
+                    name=f"AMD_{symbol}", weight=2.0,
+                    sl_multiplier=sl_mult,
+                    tp_multiplier=tp_mult
+                ),
+                RsiMacdStrategy(
+                    name=f"RSI_MACD_{symbol}", weight=1.5,
+                    sl_multiplier=sl_mult,
+                    tp_multiplier=tp_mult
+                ),
+                EMACrossoverStrategy(
+                    name=f"EMA_X_{symbol}", weight=1.0,
+                    sl_multiplier=sl_mult,
+                    tp_multiplier=tp_mult
                 )
             ]
             self._symbol_strategies[symbol] = strategies
@@ -488,19 +503,44 @@ class Engine:
             return
         self._last_signal_candle[symbol] = last_candle_time
 
-        # --- NOUVEAU: Filtre Global de Tendance (ADX > 25) ---
+        # --- Filtre Global de Régime & Tendance Macro (ADX + EMA Macro) ---
         try:
             import ta
-            adx_series = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
-            current_adx = adx_series.iloc[-1]
-            if current_adx < 25:
-                if signal.confidence >= 0.90:
-                    logging.info(f"[Engine] ⚡ ADX Bypass: Signal de Haute Qualité Institutionnelle (Conférence {signal.confidence*100}%) sur {symbol}. L'ADX est ignoré.")
-                else:
-                    logging.info(f"[Engine] 🛑 Rejet ADX: Marché en range sur {symbol} (ADX = {current_adx:.1f} < 25).")
-                    return
+            if len(df) >= 30:
+                adx_series = ta.trend.adx(df['high'], df['low'], df['close'], window=14)
+                current_adx = adx_series.iloc[-1] if not adx_series.empty and not pd.isna(adx_series.iloc[-1]) else 20.0
+            else:
+                current_adx = 20.0
+
+            # 1. Filtre de Tendance Macro (EMA 200 ou max disponible)
+            if len(df) >= 50:
+                ema_span = min(200, len(df))
+                ema_macro = df['close'].ewm(span=ema_span, adjust=False).mean().iloc[-1]
+                
+                # RÈGLE ABSOLUE ANTI-COUTEAU QUI TOMBE / ANTI-CONTRETENDANCE FORTE :
+                # Si le marché est en tendance directionnelle puissante (ADX >= 28),
+                # INTERDICTION FORMELLE de prendre position contre la tendance de fond !
+                if current_adx >= 28.0:
+                    if signal.direction == OrderType.BUY and last_close < ema_macro:
+                        logging.warning(
+                            f"[Engine] 🛑 Rejet Contre-Tendance Forte sur {symbol} : "
+                            f"ACHAT refusé sous EMA Macro ({last_close:.5f} < {ema_macro:.5f}) en plein trend baissier (ADX={current_adx:.1f} >= 28)"
+                        )
+                        return
+                    elif signal.direction == OrderType.SELL and last_close > ema_macro:
+                        logging.warning(
+                            f"[Engine] 🛑 Rejet Contre-Tendance Forte sur {symbol} : "
+                            f"VENTE refusée au-dessus EMA Macro ({last_close:.5f} > {ema_macro:.5f}) en plein trend haussier (ADX={current_adx:.1f} >= 28)"
+                        )
+                        return
+
+            # 2. Marché atone / sans volatilité
+            if current_adx < 18.0 and signal.confidence < 0.85:
+                logging.info(f"[Engine] 🛑 Rejet Marché Atone : Manque de volatilité directionnelle sur {symbol} (ADX={current_adx:.1f} < 18, Conf={signal.confidence:.2f}).")
+                return
+
         except Exception as e:
-            logging.warning(f"[Engine] Erreur calcul ADX: {e}")
+            logging.warning(f"[Engine] Erreur calcul filtre ADX/Macro: {e}")
 
 
         # Pré-calcul SL/TP pour l'affichage Dashboard
