@@ -137,3 +137,151 @@ def test_trade_with_sl_pips_computes_prices_and_logs_audit(client):
                 sl=1.0830,
                 tp=1.0890
             )
+
+
+def test_trade_excessive_risk_rejected_on_standard_account(client):
+    with patch.object(Config, "API_SECRET_KEY", "test_key_m01"):
+        headers = {"X-API-Key": "test_key_m01"}
+        with patch("api.server._engine") as mock_engine:
+            mock_engine.kill_switch.is_triggered = False
+            mock_engine.pretrade_validator.validate_signal.return_value = True
+            mock_engine._compute_sl_tp_prices.return_value = (1.0800, 1.0900)
+            mock_engine.state_manager.account = AccountInfo(
+                login=123,
+                balance=1000.0,
+                equity=1000.0,
+                free_margin=900.0,
+                margin_level=500.0,
+                currency="USD",
+                server="DemoServer"
+            )
+            mock_engine.state_manager.positions = []
+            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine._get_pip_size.return_value = 0.0001
+            mock_engine._get_pip_value.return_value = 10.0
+
+            # 1.00 lot avec 50 pips SL = 500$ de risque (50% de l'équité > max 3% = 30$)
+            res = client.post(
+                "/trade",
+                json={
+                    "symbol": "EURUSD",
+                    "direction": "BUY",
+                    "volume": 1.00,
+                    "sl_pips": 50.0,
+                    "tp_pips": 100.0
+                },
+                headers=headers
+            )
+            assert res.status_code == 400
+            assert "Risque estimé" in res.json().get("detail", "")
+
+
+def test_trade_micro_account_tolerates_micro_lot(client):
+    with patch.object(Config, "API_SECRET_KEY", "test_key_m01"):
+        headers = {"X-API-Key": "test_key_m01"}
+        with patch("api.server._engine") as mock_engine:
+            mock_engine.kill_switch.is_triggered = False
+            mock_engine.pretrade_validator.validate_signal.return_value = True
+            mock_engine._compute_sl_tp_prices.return_value = (1.0800, 1.0900)
+            mock_engine.connector.execute_order.return_value = {"ticket": 12345, "price": 1.0850, "volume": 0.01}
+            # Compte de 10$
+            mock_engine.state_manager.account = AccountInfo(
+                login=123,
+                balance=10.0,
+                equity=10.0,
+                free_margin=8.0,
+                margin_level=300.0,
+                currency="USD",
+                server="DemoServer"
+            )
+            mock_engine.state_manager.positions = []
+            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine._get_pip_size.return_value = 0.0001
+            mock_engine._get_pip_value.return_value = 10.0
+
+            # 0.01 lot avec 15 pips SL = 1.50$ (<= max(2.00$, 1.50$) = 2.00$) -> ACCEPTÉ
+            res = client.post(
+                "/trade",
+                json={
+                    "symbol": "EURUSD",
+                    "direction": "BUY",
+                    "volume": 0.01,
+                    "sl_pips": 15.0,
+                    "tp_pips": 30.0
+                },
+                headers=headers
+            )
+            assert res.status_code == 200
+            assert res.json().get("ticket") == 12345
+
+
+def test_trade_micro_account_blocks_excessive_risk(client):
+    with patch.object(Config, "API_SECRET_KEY", "test_key_m01"):
+        headers = {"X-API-Key": "test_key_m01"}
+        with patch("api.server._engine") as mock_engine:
+            mock_engine.kill_switch.is_triggered = False
+            mock_engine.pretrade_validator.validate_signal.return_value = True
+            mock_engine._compute_sl_tp_prices.return_value = (1.0800, 1.0900)
+            # Compte de 10$
+            mock_engine.state_manager.account = AccountInfo(
+                login=123,
+                balance=10.0,
+                equity=10.0,
+                free_margin=8.0,
+                margin_level=300.0,
+                currency="USD",
+                server="DemoServer"
+            )
+            mock_engine.state_manager.positions = []
+            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine._get_pip_size.return_value = 0.0001
+            mock_engine._get_pip_value.return_value = 10.0
+
+            # 0.10 lot avec 20 pips SL = 20$ de risque (> max(2.00, 1.50) = 2.00$) -> REJETÉ
+            res = client.post(
+                "/trade",
+                json={
+                    "symbol": "EURUSD",
+                    "direction": "BUY",
+                    "volume": 0.10,
+                    "sl_pips": 20.0,
+                    "tp_pips": 40.0
+                },
+                headers=headers
+            )
+            assert res.status_code == 400
+            assert "Risque estimé" in res.json().get("detail", "")
+
+
+def test_broker_router_anti_duplicate():
+    from infrastructure.broker_router import BrokerRouter
+    from core.interfaces import PositionInfo, OrderType
+
+    primary = MagicMock()
+    fallback = MagicMock()
+    router = BrokerRouter(primary, fallback)
+
+    # Primary execute échoue ou timeout
+    primary.execute_order.return_value = None
+    # Mais la position a été ouverte sur MT5
+    existing_pos = PositionInfo(
+        ticket=777,
+        symbol="EURUSD",
+        type=OrderType.BUY,
+        volume=0.01,
+        open_price=1.0850,
+        current_price=1.0850,
+        sl=1.0800,
+        tp=1.0900,
+        profit=0.0,
+        time=1000,
+        magic=123456
+    )
+    primary.get_positions.return_value = [existing_pos]
+
+    res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456)
+    assert res is not None
+    assert res["ticket"] == 777
+    # Vérification formelle que le fallback n'a jamais été sollicité
+    fallback.execute_order.assert_not_called()
+

@@ -123,6 +123,18 @@ class BrokerRouter(IBrokerConnector):
     def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
         result = self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic)
         if result is None and self._active_broker == self.primary:
+            # Vérification anti-doublon : s'assurer que l'ordre n'a pas été exécuté sur le primaire avant de basculer
+            try:
+                existing_positions = self.primary.get_positions(symbol)
+                if existing_positions and magic > 0:
+                    matching = [p for p in existing_positions if p.magic == magic]
+                    if matching:
+                        pos = matching[-1]
+                        logging.warning(f"[BrokerRouter] ⚠️ Ordre sur {symbol} (magic={magic}) détecté sur le primaire malgré le timeout/erreur. Évitement du doublon.")
+                        return {"ticket": pos.ticket, "price": pos.open_price, "volume": pos.volume}
+            except Exception as e:
+                logging.error(f"[BrokerRouter] Erreur vérification anti-doublon: {e}")
+
             if self._switch_to_fallback():
                 return self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic)
         return result

@@ -700,17 +700,27 @@ class Engine:
         except Exception as guard_err:
             logging.warning(f"[Engine] Erreur vérification distance SL: {guard_err}")
 
-        # 7.2 Vérification du risque monétaire absolu vs équité
+        # 7.2 Vérification du risque monétaire absolu vs équité (Garde-fou adaptatif au capital)
         account_equity = self.state_manager.account.equity if self.state_manager.account else 0.0
         if account_equity > 0:
             pip_val = self._get_pip_value(symbol, sym_info, pip_size)
             effective_sl_pips = validated_signal.sl_pips or 20.0
             est_risk = effective_sl_pips * pip_val * volume
-            # Tolérance max absolue : 15% de l'équité pour 1 trade
-            if est_risk > max(0.50, account_equity * 0.15):
+            
+            # Formule adaptative :
+            # - Compte standard (>= 100$) : Max 3% du capital par trade (prudent/institutionnel)
+            # - Micro-compte (< 100$) : Tolérance micro-lot (0.01 lot) max(2.00$, 15% équité)
+            if account_equity >= 100.0:
+                max_allowed_risk = account_equity * 0.03
+                threshold_label = f"3% de l'équité ({max_allowed_risk:.2f}$)"
+            else:
+                max_allowed_risk = max(2.00, account_equity * 0.15)
+                threshold_label = f"seuil micro-compte ({max_allowed_risk:.2f}$)"
+
+            if est_risk > max_allowed_risk:
                 logging.critical(
                     f"[Engine] 🚨 REJET RISQUE EXCESSIF : Perte potentielle {est_risk:.2f}$ "
-                    f"> 15% de l'équité ({account_equity:.2f}$). Ordre bloqué pour éviter la liquidation."
+                    f"> {threshold_label} (Équité: {account_equity:.2f}$). Ordre bloqué pour préserver le capital."
                 )
                 execution_metrics.record_pretrade_rejection("EXCESSIVE_RISK_PER_TRADE")
                 return

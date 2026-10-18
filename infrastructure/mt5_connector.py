@@ -197,7 +197,11 @@ class MT5Connector(IBrokerConnector):
                 volume = round(volume / step) * step
                 
             action_type = mt5.ORDER_TYPE_BUY if order_type == OrderType.BUY else mt5.ORDER_TYPE_SELL
-            price = mt5.symbol_info_tick(symbol).ask if order_type == OrderType.BUY else mt5.symbol_info_tick(symbol).bid
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                logging.error(f"[MT5Connector] Impossible d'obtenir le tick pour {symbol}")
+                return None
+            price = tick.ask if order_type == OrderType.BUY else tick.bid
             
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -242,7 +246,11 @@ class MT5Connector(IBrokerConnector):
                 
             pos = position[0]
             order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
-            price = mt5.symbol_info_tick(pos.symbol).bid if pos.type == mt5.POSITION_TYPE_BUY else mt5.symbol_info_tick(pos.symbol).ask
+            tick = mt5.symbol_info_tick(pos.symbol)
+            if tick is None:
+                logging.error(f"[MT5Connector] Impossible d'obtenir le tick pour clôture de {pos.symbol}")
+                return False
+            price = tick.bid if pos.type == mt5.POSITION_TYPE_BUY else tick.ask
         
         request = {
             "action": mt5.TRADE_ACTION_DEAL,

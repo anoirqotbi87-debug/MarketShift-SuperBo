@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import json
 import urllib.request
 from urllib.error import URLError

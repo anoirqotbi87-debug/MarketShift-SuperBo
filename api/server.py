@@ -400,11 +400,10 @@ async def verify_api_key(request: Request, api_key_header: str = Security(api_ke
     if api_key_header and api_key_header in valid_keys:
         return api_key_header
 
-    # En environnement dev ou appel local/direct (localhost / loopback), autoriser pour fluidité du dashboard
+    # Appel local/direct (localhost / loopback / testclient) autorisé sans clé pour outils d'administration locale
     client_host = request.client.host if request.client else ""
     is_localhost = client_host in ("127.0.0.1", "localhost", "::1", "testclient")
-    is_dev = Config.ENVIRONMENT.lower() in ("development", "dev", "test")
-    if is_localhost or is_dev:
+    if is_localhost:
         return api_key_header or ""
 
     raise HTTPException(
@@ -1060,6 +1059,47 @@ def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
             raise
         except Exception as e:
             logging.error(f"[API] Erreur PreTradeValidator lors de l'ordre manuel : {e}")
+
+    # 2.1 Contrôle de risque monétaire absolu vs capital (Garde-fou adaptatif)
+    try:
+        account_equity = _engine.state_manager.account.equity if (_engine.state_manager and _engine.state_manager.account) else 0.0
+        if account_equity > 0:
+            sym_info = _engine.connector.get_symbol_info(req.symbol)
+            pip_size = _engine._get_pip_size(req.symbol)
+            pip_val = _engine._get_pip_value(req.symbol, sym_info, pip_size)
+            
+            if req.sl_pips is not None and req.sl_pips > 0:
+                effective_sl_pips = req.sl_pips
+            elif effective_sl > 0:
+                current_price = getattr(sym_info, 'ask', None) if order_type == OrderType.BUY else getattr(sym_info, 'bid', None)
+                if current_price is None or current_price <= 0:
+                    current_price = effective_sl
+                effective_sl_pips = abs(current_price - effective_sl) / max(1e-5, pip_size)
+            else:
+                effective_sl_pips = 20.0
+
+            est_risk = effective_sl_pips * pip_val * req.volume
+
+            if account_equity >= 100.0:
+                max_allowed_risk = account_equity * 0.03
+                threshold_label = f"3% de l'équité ({max_allowed_risk:.2f}$)"
+            else:
+                max_allowed_risk = max(2.00, account_equity * 0.15)
+                threshold_label = f"seuil micro-compte ({max_allowed_risk:.2f}$)"
+
+            if est_risk > max_allowed_risk:
+                logging.critical(
+                    f"[API] 🚨 REJET RISQUE EXCESSIF : Ordre manuel sur {req.symbol} ({req.volume} lot) "
+                    f"risque {est_risk:.2f}$ > {threshold_label}. Ordre bloqué."
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ordre rejeté : Risque estimé ({est_risk:.2f}$) supérieur à la limite autorisée {threshold_label}."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.warning(f"[API] Erreur contrôle de risque monétaire ordre manuel: {e}")
 
     # 3. Exécution avec Stop Loss garanti côté broker
     tp_to_send = effective_tp if (effective_tp is not None and effective_tp > 0) else 0.0
