@@ -121,17 +121,37 @@ class BrokerRouter(IBrokerConnector):
         return positions
 
     def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
+        # Capture de l'état initial des tickets sur le broker principal pour éviter tout faux positif
+        pre_tickets = set()
+        if self._active_broker == self.primary:
+            try:
+                positions_before = self.primary.get_positions(symbol)
+                if positions_before:
+                    pre_tickets = {p.ticket for p in positions_before}
+            except Exception as e:
+                logging.debug(f"[BrokerRouter] Lecture positions pré-ordre: {e}")
+
         result = self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic)
         if result is None and self._active_broker == self.primary:
-            # Vérification anti-doublon : s'assurer que l'ordre n'a pas été exécuté sur le primaire avant de basculer
+            # Vérification anti-doublon précise : détecter si une NOUVELLE position a été créée
             try:
-                existing_positions = self.primary.get_positions(symbol)
-                if existing_positions and magic > 0:
-                    matching = [p for p in existing_positions if p.magic == magic]
-                    if matching:
-                        pos = matching[-1]
-                        logging.warning(f"[BrokerRouter] ⚠️ Ordre sur {symbol} (magic={magic}) détecté sur le primaire malgré le timeout/erreur. Évitement du doublon.")
-                        return {"ticket": pos.ticket, "price": pos.open_price, "volume": pos.volume}
+                import time
+                time.sleep(0.15)  # Tolérance de synchronisation réseau broker
+                post_positions = self.primary.get_positions(symbol) or []
+                new_positions = [p for p in post_positions if p.ticket not in pre_tickets]
+                
+                # Filtrer les nouvelles positions correspondant au trade envoyé
+                matching = [
+                    p for p in new_positions
+                    if p.type == order_type and abs(p.volume - volume) < 1e-4 and (magic == 0 or p.magic == magic)
+                ]
+                if matching:
+                    pos = matching[-1]
+                    logging.warning(
+                        f"[BrokerRouter] ⚠️ Ordre sur {symbol} (ticket={pos.ticket}, magic={magic}) "
+                        f"détecté sur le primaire après confirmation tardive/timeout. Évitement du doublon de secours."
+                    )
+                    return {"ticket": pos.ticket, "price": pos.open_price, "volume": pos.volume}
             except Exception as e:
                 logging.error(f"[BrokerRouter] Erreur vérification anti-doublon: {e}")
 

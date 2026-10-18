@@ -5,7 +5,7 @@ from infrastructure.config import Config, AppConfig
 from api.server import app
 
 def test_api_secret_key_default_empty():
-    cfg = AppConfig()
+    cfg = AppConfig(_env_file=None)
     assert cfg.API_SECRET_KEY == ""
 
 def test_api_secret_key_production_failfast():
