@@ -12,8 +12,12 @@ Nouveautés v2.0 :
 """
 
 import asyncio
+import hashlib
+import json
 import logging
+import math
 import datetime
+import threading
 import time
 from collections import deque
 from typing import List, Optional, Any, Dict
@@ -168,6 +172,36 @@ def init_api(engine: Engine):
 # WebSocket Endpoint + Broadcaster
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _minimal_ws_snapshot() -> Dict[str, Any]:
+    """Snapshot de secours infaillible (ne lève jamais).
+
+    Utilisé quand l'état d'engine est partiel/incohérent : la connexion WS ne
+    doit jamais rester pendue faute de données exploitables.
+    """
+    try:
+        return {
+            "type":           "snapshot",
+            "timestamp":      datetime.datetime.now().isoformat(),
+            "account":        {},
+            "positions":      [],
+            "signals":        {},
+            "kelly":          {},
+            "ml":             {},
+            "macro":          None,
+            "logs":           [],
+            "killSwitch":     _engine.kill_switch.is_triggered if _engine else False,
+            "isPaused":       _engine.state_manager.is_paused if _engine else False,
+            "tradingMode":    _runtime_settings.trading_mode,
+            "primaryTimeframe": _runtime_settings.primary_timeframe,
+            "mtfEnabled":     _runtime_settings.mtf_enabled,
+            "htfTimeframe":   _runtime_settings.htf_timeframe,
+            "activeSymbols":  list(getattr(_engine, "symbols", []) or []),
+            "availableSymbols": list(getattr(_engine, "available_symbols", []) or []),
+            "executionMetrics": {},
+        }
+    except Exception:
+        return {"type": "snapshot", "timestamp": datetime.datetime.now().isoformat()}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None):
     # Sécurisation du WebSocket par clé d'API passée en query param
@@ -191,8 +225,15 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None
         
     await _ws_manager.connect(websocket)
     try:
-        # Envoyer un snapshot immédiat à la connexion
-        snapshot = _build_ws_snapshot()
+        # Envoyer un snapshot immédiat à la connexion. Le calcul ne doit JAMAIS
+        # laisser le client suspendu : si l'état d'engine est partiel/incohérent,
+        # on envoie un snapshot minimal (le client, par ex. le dashboard, reste
+        # cohérent et la boucle keep-alive peut continuer).
+        try:
+            snapshot = _build_ws_snapshot()
+        except Exception as e:
+            logging.error(f"[WebSocket] Snapshot indisponible, envoi d'un snapshot minimal : {e}")
+            snapshot = _minimal_ws_snapshot()
         await websocket.send_json(snapshot)
 
         # Maintenir la connexion active (keep-alive)
@@ -209,6 +250,13 @@ async def websocket_endpoint(websocket: WebSocket, api_key: Optional[str] = None
     except Exception as e:
         logging.debug(f"[WebSocket] Erreur connexion: {e}")
         _ws_manager.disconnect(websocket)
+        try:
+            # Fermeture explicite à destination du client : sans cette trame, un
+            # client qui attend receive_json() resterait suspendu indéfiniment
+            # (le disconnect() ci-dessus ne fait que retirer la connexion de la liste).
+            await websocket.close(code=1011, reason="Internal error")
+        except Exception:
+            pass
 
 
 async def _broadcast_loop():
@@ -966,6 +1014,216 @@ def get_ml_status():
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Idempotence & Réconciliation des ordres (verrouillage multi-facteurs)
+# ─────────────────────────────────────────────────────────────────────────────
+# Statuts possibles d'un ordre soumis via POST /trade avec `idem_key` :
+#   - PROCESSING    : ordre en cours d'envoi au broker
+#   - INDETERMINATE : envoi non confirmable à coup sûr (timeout réseau, snapshot
+#                     pré-ordre indisponible, critères multi-facteurs non satisfaits)
+#   - CONFIRMED     : réconcilié avec certitude (critères a–g à jour)
+#   - FAILED        : ordre explicitement rejeté / introuvable (ne sera jamais confirmé)
+#
+# Aucun ordre adopté sans preuve d'identité multi-facteurs ; un doute = INDETERMINATE.
+
+ORDER_STATUS_PROCESSING = "PROCESSING"
+ORDER_STATUS_INDETERMINATE = "INDETERMINATE"
+ORDER_STATUS_CONFIRMED = "CONFIRMED"
+ORDER_STATUS_FAILED = "FAILED"
+
+
+def _derive_order_magic(idem_key: str) -> int:
+    """Dérive un magic strictement positif (> 0) déterministe depuis `idem_key`.
+
+    Deux ordres distincts n'ont jamais le même magic (SHA-256 complet de l'idem_key,
+    tronqué à 31 bits puis forcé > 0). magic == 0 est structurellement impossible.
+    """
+    digest = hashlib.sha256(idem_key.encode("utf-8")).digest()
+    return (int.from_bytes(digest[:8], "big") & 0x7FFFFFFF) or 1
+
+
+class IdempotencyBlockedError(RuntimeError):
+    """La clé demandée est déjà en cours (ou terminée) : ré-exécution refusée."""
+
+    def __init__(self, idem_key: str, status: str):
+        super().__init__(f"idem_key {idem_key!r} déjà traité (status={status})")
+        self.idem_key = idem_key
+        self.status = status
+
+
+class IdempotencyPersistenceError(RuntimeError):
+    """La persistance n'a pas pu être garantie : l'exécution est refusée (fail-closed)."""
+
+
+def _persist_idempotency_record(idem_key: str, status: str, payload: Optional[Dict[str, Any]] = None, **extra: Any) -> bool:
+    """Persiste un enregistrement dans la table idempotency_records.
+
+    Pour les ordres, la persistance n'est PAS facultative : si cet appel échoue,
+    le magasin refusera d'exécuter (garantie anti-doublon impossible).
+    Retourne True si l'écriture a été confirmée (commit), False sinon.
+    Cette fonction n'est jamais bloquante : toute erreur est convertie en False.
+    """
+    try:
+        from infrastructure.database import SessionLocal
+        from infrastructure.models import IdempotencyRecord
+        db = SessionLocal()
+        try:
+            row = db.get(IdempotencyRecord, idem_key)
+            if row is None:
+                row = IdempotencyRecord(idem_key=idem_key)
+                db.add(row)
+            payload = payload or {}
+            row.status = status
+            row.symbol = payload.get("symbol") or getattr(row, "symbol", None)
+            row.direction = payload.get("direction") or getattr(row, "direction", None)
+            row.volume = payload.get("volume") or getattr(row, "volume", None)
+            row.sl_price = payload.get("sl_price") or getattr(row, "sl_price", None)
+            row.tp_price = payload.get("tp_price") or getattr(row, "tp_price", None)
+            row.magic = payload.get("magic") or extra.get("magic") or getattr(row, "magic", 0)
+            row.order_comment = payload.get("order_comment") or extra.get("order_comment") or getattr(row, "order_comment", "")
+            row.ticket = extra.get("ticket") or getattr(row, "ticket", None)
+            row.pre_snapshot_ok = payload.get("pre_snapshot_ok", getattr(row, "pre_snapshot_ok", False))
+            pre_list = payload.get("pre_existing_tickets") or extra.get("pre_existing_tickets") or []
+            if isinstance(pre_list, list):
+                row.pre_existing_tickets = json.dumps(pre_list, ensure_ascii=False)
+            row.reason = extra.get("reason")
+            if status == ORDER_STATUS_CONFIRMED and not row.confirmed_at:
+                row.confirmed_at = datetime.datetime.utcnow()
+            db.commit()
+        finally:
+            db.close()
+        return True
+    except Exception as e:
+        logging.error(f"[API] Persistance idempotence {idem_key!r} indisponible (écriture refusée, fail-closed) : {e}")
+        return False
+
+
+def _fetch_idempotency_row(idem_key: str) -> Optional[Any]:
+    """Lit la ligne persistée d'une clé, ou None si absente / erreur de lecture."""
+    try:
+        from infrastructure.database import SessionLocal
+        from infrastructure.models import IdempotencyRecord
+        db = SessionLocal()
+        try:
+            return db.get(IdempotencyRecord, idem_key)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.error(f"[API] Lecture table idempotence {idem_key!r} impossible : {e}")
+        return None
+
+
+class IdempotencyStore:
+    """Registre des ordres soumis avec idem_key (cache mémoire + table idempotency_records).
+
+    Verrouillage STRICT (multi-facteurs, fail-closed) :
+      - une clé déjà enregistrée (PROCESSING / INDETERMINATE / CONFIRMED) ne peut JAMAIS
+        être ré-exécutée ; `create_process` lève IdempotencyBlockedError dans ce cas ;
+      - la persistance est OBLIGATOIRE : si l'écriture PROCESSING échoue, l'exécution est
+        refusée (IdempotencyPersistenceError). Sans preuve persistée, on ne peut pas
+        garantir l'absence de doublon après redémarrage.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._records: Dict[str, Dict[str, Any]] = {}
+
+    def create_process(self, idem_key: str, payload: Dict[str, Any]) -> None:
+        """Enregistre la clé en PROCESSING (persistance OBLIGATOIRE).
+
+        Lève :
+          - IdempotencyBlockedError   si la clé existe déjà (mémoire ou table) avec un
+                                      statut non-FAILED (ré-exécution interdite),
+          - IdempotencyPersistenceError si l'écriture persistée échoue (fail-closed).
+        """
+        with self._lock:
+            mem = self._records.get(idem_key)
+            if mem is not None:
+                st = mem.get("status")
+                if st != ORDER_STATUS_FAILED:
+                    raise IdempotencyBlockedError(idem_key, st or ORDER_STATUS_PROCESSING)
+                # FAILED : retry autorisé, on repart d'une page blanche
+                del self._records[idem_key]
+
+            # Restauration inter-processus : une clé déjà persistée (même en cours)
+            # prouve qu'un ordre a déjà été soumis pour cette clé.
+            row = _fetch_idempotency_row(idem_key)
+            if row is not None:
+                st = row.status or ""
+                if st != ORDER_STATUS_FAILED:
+                    raise IdempotencyBlockedError(idem_key, st)
+                # FAILED persisté : on autorise le retry APRÈS capture de la ligne existante
+                # pour préserver l'unicité du magic (voir update ci-dessous).
+
+        # Persistance OBLIGATOIRE avant exécution : si elle échoue, l'ordre est REFUSÉ.
+        if not _persist_idempotency_record(idem_key, ORDER_STATUS_PROCESSING, payload):
+            raise IdempotencyPersistenceError(idem_key)
+
+        with self._lock:
+            record = self._records.setdefault(idem_key, {})
+            record.setdefault("status", ORDER_STATUS_PROCESSING)
+            # Modifications uniquement si l'ordre n'a pas déjà été confirmé/échoué
+            if record["status"] not in (ORDER_STATUS_CONFIRMED, ORDER_STATUS_FAILED):
+                record.update(payload)
+                record["status"] = ORDER_STATUS_PROCESSING
+            if row is not None and row.status == ORDER_STATUS_FAILED:
+                record.setdefault("was_failed_retry", True)
+
+    def update_status(self, idem_key: str, status: str, **extra: Any) -> None:
+        with self._lock:
+            record = self._records.setdefault(idem_key, {})
+            record["status"] = status
+            record.update(extra)
+        _persist_idempotency_record(idem_key, status, **extra)
+
+    def get(self, idem_key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            rec = self._records.get(idem_key)
+        if rec is not None:
+            return dict(rec)
+        # Restauration depuis la table (processus relancé)
+        row = _fetch_idempotency_row(idem_key)
+        if row is None:
+            return None
+        import json as _json
+        try:
+            pre_tickets = _json.loads(row.pre_existing_tickets) if row.pre_existing_tickets else []
+        except Exception:
+            pre_tickets = []
+        restored = {
+            "status": row.status,
+            "idem_key": row.idem_key,
+            "symbol": row.symbol,
+            "direction": row.direction,
+            "volume": row.volume,
+            "sl_price": row.sl_price,
+            "tp_price": row.tp_price,
+            "magic": row.magic,
+            "order_comment": row.order_comment,
+            "ticket": row.ticket,
+            "pre_snapshot_ok": bool(row.pre_snapshot_ok),
+            "pre_existing_tickets": [int(t) for t in pre_tickets],
+            "reason": row.reason,
+            "created_at": row.created_at,
+            "confirmed_at": row.confirmed_at,
+        }
+        with self._lock:
+            self._records[idem_key] = restored
+        return dict(restored)
+
+    def pre_existing_tickets(self, idem_key: str) -> Optional[List[int]]:
+        rec = self.get(idem_key)
+        if not rec:
+            return None
+        tickets = rec.get("pre_existing_tickets")
+        if tickets is None:
+            return None
+        return list(tickets)
+
+
+idempotency_store = IdempotencyStore()
+
+
 class TradeRequest(BaseModel):
     symbol: str
     direction: str
@@ -974,12 +1232,32 @@ class TradeRequest(BaseModel):
     tp_price: Optional[float] = None
     sl_pips: Optional[float] = None
     tp_pips: Optional[float] = None
+    idem_key: Optional[str] = None
+    magic: Optional[int] = None
 
     @field_validator("volume")
     @classmethod
     def validate_volume(cls, v):
         if v <= 0:
             raise ValueError("Le volume d'ordre doit être strictement positif (> 0).")
+        return v
+
+    @field_validator("idem_key")
+    @classmethod
+    def validate_idem_key(cls, v):
+        if v is not None:
+            v = (v or "").strip()
+            if not v:
+                raise ValueError("idem_key ne peut pas être vide.")
+            if len(v) > 128:
+                raise ValueError("idem_key trop long (max 128 caractères).")
+        return v
+
+    @field_validator("magic")
+    @classmethod
+    def validate_magic(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("magic doit être strictement positif (> 0).")
         return v
 
 
@@ -1143,18 +1421,258 @@ def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
             detail=f"Ordre rejeté par mesure de sécurité (Fail-Closed) : Erreur lors du calcul du risque ({e})."
         )
 
-    # 3. Exécution avec Stop Loss garanti côté broker
+    # 2.2 Validation des contraintes du broker (PRIORITÉ 2 — Fail-Closed)
+    #     Vérifie systématiquement avant tout envoi :
+    #     - trade_tick_size > 0, trade_tick_value > 0, point > 0, ask >= bid > 0
+    #     - volume_min <= volume <= volume_max + alignement strict sur volume_step
+    #     - trade_stops_level (et trade_freeze_level) : distance SL/TP >= max(stops, freeze) * point
+    try:
+        broker_info = _engine.connector.get_symbol_info(req.symbol)
+        if broker_info is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Ordre rejeté (Fail-Closed) : Informations de symbole indisponibles pour les contrôles broker."
+            )
+
+        def _f(attr: str) -> float:
+            """float sûr : non-fini (NaN/Inf) → 0.0 pour forcer le refus fail-closed."""
+            try:
+                v = float(getattr(broker_info, attr, 0) or 0)
+            except (ValueError, TypeError):
+                return 0.0
+            return v if math.isfinite(v) else 0.0
+
+        b_inf = {
+            "point": _f("point"),
+            "trade_tick_size": _f("trade_tick_size"),
+            "trade_tick_value": _f("trade_tick_value"),
+            "volume_min": _f("volume_min"),
+            "volume_max": _f("volume_max"),
+            "volume_step": _f("volume_step"),
+            "trade_stops_level": _f("trade_stops_level"),
+            "trade_freeze_level": _f("trade_freeze_level"),
+            "ask": _f("ask"),
+            "bid": _f("bid"),
+            "spread": _f("spread"),
+        }
+
+        if b_inf["trade_tick_size"] <= 0 or b_inf["trade_tick_value"] <= 0 or b_inf["point"] <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Ordre rejeté (Fail-Closed) : Le symbole n'a pas de tick size / tick value / point valides (> 0)."
+            )
+        if b_inf["ask"] < b_inf["bid"] or b_inf["ask"] <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Ordre rejeté (Fail-Closed) : Cotation invalide (ask < bid ou ask <= 0)."
+            )
+
+        # Volume : min / max / step (alignement strict)
+        if req.volume < b_inf["volume_min"] or req.volume > b_inf["volume_max"]:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"INVALID_VOLUME : volume {req.volume} hors bornes broker "
+                    f"[{b_inf['volume_min']}, {b_inf['volume_max']}]."
+                )
+            )
+        if b_inf["volume_step"] > 0:
+            aligned = round((req.volume - b_inf["volume_min"]) / b_inf["volume_step"]) * b_inf["volume_step"]
+            if abs(aligned - (req.volume - b_inf["volume_min"])) >= 1e-6:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"INVALID_VOLUME : volume {req.volume} non aligné sur le step broker {b_inf['volume_step']}."
+                )
+
+        # Stops : distance de l'exécution au SL/TP >= max(stops_level, freeze_level) * point
+        exec_price = b_inf["ask"] if order_type == OrderType.BUY else b_inf["bid"]
+        min_stop_distance = max(b_inf["trade_stops_level"], b_inf["trade_freeze_level"]) * b_inf["point"]
+        if min_stop_distance > 0:
+            sl_dist = abs(exec_price - float(effective_sl))
+            if sl_dist < min_stop_distance:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"INVALID_STOPS_DISTANCE : SL à {float(effective_sl):.5f} trop proche de l'exécution "
+                        f"{exec_price:.5f} (min {min_stop_distance:.5f})."
+                    )
+                )
+            if effective_tp is not None and effective_tp > 0:
+                tp_dist = abs(float(effective_tp) - exec_price)
+                if tp_dist < min_stop_distance:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"INVALID_STOPS_DISTANCE : TP à {float(effective_tp):.5f} trop proche de l'exécution "
+                            f"{exec_price:.5f} (min {min_stop_distance:.5f})."
+                        )
+                    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.critical(f"[API] 🚨 REJET SÉCURITÉ FAIL-CLOSED : Échec des contrôles broker : {e}")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Ordre rejeté par mesure de sécurité (Fail-Closed) : Contrôles broker indisponibles ({e})."
+        )
+
+    # 2.3 Idempotence & preuve d'identité multi-facteurs (PRIORITÉ 1)
+    #     Si un idem_key est fourni : on persiste l'ordre en PROCESSING avant l'appel broker,
+    #     avec le snapshot pré-ordre exact, un magic déterministe > 0 et un commentaire ms_<idem>.
     tp_to_send = effective_tp if (effective_tp is not None and effective_tp > 0) else 0.0
+    order_magic: Optional[int] = None
+    order_comment: str = ""
+    use_idem: bool = bool(req.idem_key)
+
+    if use_idem:
+        order_magic = req.magic if (req.magic is not None and req.magic > 0) else _derive_order_magic(req.idem_key)
+        order_comment = f"ms_{req.idem_key[:24]}"
+
+        # Snapshot pré-ordre : capture la liste exacte des tickets déjà ouverts
+        pre_existing_tickets: List[int] = []
+        pre_snapshot_ok = True
+        try:
+            positions_before = _engine.connector.get_positions(req.symbol)
+            if positions_before:
+                pre_existing_tickets = sorted({int(p.ticket) for p in positions_before})
+            pre_snapshot_ok = True
+        except Exception as e:
+            pre_snapshot_ok = False
+            logging.error(f"[API] Snapshot pré-ordre indisponible pour idem_key {req.idem_key!r}: {e}")
+
+        try:
+            idempotency_store.create_process(
+                req.idem_key,
+                {
+                    "symbol": req.symbol,
+                    "direction": dir_upper,
+                    "volume": req.volume,
+                    "sl_price": float(effective_sl),
+                    "tp_price": float(tp_to_send if "tp_to_send" in locals() else (effective_tp or 0.0)),
+                    "magic": order_magic,
+                    "order_comment": order_comment,
+                    "pre_existing_tickets": list(pre_existing_tickets),
+                    "pre_snapshot_ok": pre_snapshot_ok,
+                    "created_at": time.time(),
+                },
+            )
+        except IdempotencyPersistenceError:
+            logging.critical(
+                f"[API] REJET FAIL-CLOSED : persistance idempotence impossible pour idem_key {req.idem_key!r} "
+                "(SQLite indisponible). Aucun ordre envoyé."
+            )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"VERROU FAIL-CLOSED : persistance de l'idempotence impossible pour "
+                    f"idem_key {req.idem_key!r} — ordre NON envoyé."
+                ),
+            )
+        except IdempotencyBlockedError as blocked:
+            if blocked.status == ORDER_STATUS_CONFIRMED:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"CONFLIT : idem_key {req.idem_key!r} déjà confirmé. Aucune ré-exécution.",
+                )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"CONFLIT : idem_key {req.idem_key!r} déjà en cours "
+                    f"(statut={blocked.status}). Aucune ré-exécution."
+                ),
+            )
+        # Si on ne peut pas prouver le snapshot pré-ordre → état INDETERMINATE immédiat,
+        # l'ordre n'est JAMAIS envoyé au broker (412 / 504 : on ne peut pas prouver l'absence de doublon).
+        if not pre_snapshot_ok:
+            idempotency_store.update_status(
+                req.idem_key,
+                ORDER_STATUS_INDETERMINATE,
+                reason="pre_snapshot_ok=False",
+            )
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"INDETERMINATE : snapshot pré-ordre non fiable pour idem_key {req.idem_key!r}. "
+                    "Ordre NON envoyé (fail-closed)."
+                ),
+            )
+
+    # 3. Exécution avec Stop Loss garanti côté broker
     result = _engine.connector.execute_order(
         req.symbol,
         order_type,
         req.volume,
         sl=float(effective_sl),
-        tp=float(tp_to_send)
+        tp=float(tp_to_send),
+        magic=order_magic or 0,
+        comment=order_comment,
     )
 
     if not result:
+        # En cas d'échec explicite (retcode != DONE), un doute subsiste sur la présence
+        # effective de la position côté broker → statut INDETERMINATE si idem_key fourni.
+        if use_idem:
+            idempotency_store.update_status(
+                req.idem_key,
+                ORDER_STATUS_INDETERMINATE,
+                reason="execute_order returned none",
+            )
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    f"INDETERMINATE : résultat broker incertain pour idem_key {req.idem_key!r}. "
+                    "Réconciliation automatique interdite tant que la position n'est pas confirmée."
+                ),
+            )
         raise HTTPException(status_code=500, detail="Échec de l'ordre")
+
+    # 3.1 Confirmation immédiate (ticket broker renvoyé par order_send)
+    if use_idem:
+        author_ticket = int(result.get("ticket", 0))
+        if author_ticket > 0:
+            # Vérification croisée sur la position réelle, alignée sur les critères a–g :
+            #   a) snapshot pré-ordre fiable ET ticket nouveau (absent du snapshot)
+            #   b) symbole identique
+            #   c) direction identique (jamais None)
+            #   d) volume identique (< 1e-6)
+            #   e) magic identique et > 0
+            #   f) commentaire identique (si le broker le fournit)
+            #   g) unicité : exactement 1 position correspondante
+            confirmed = False
+            try:
+                post_positions = _engine.connector.get_positions(req.symbol) or []
+                cand = [
+                    p for p in post_positions
+                    if (p.symbol.replace("#", "").upper() == req.symbol.replace("#", "").upper())
+                    and p.type == order_type
+                    and p.magic == order_magic
+                    and abs(float(p.volume) - float(req.volume)) < 1e-6
+                ]
+                if len(cand) == 1:
+                    p = cand[0]
+                    if p.ticket not in pre_existing_tickets:
+                        # Critère f) STRICT : si le broker a omis/tronqué le commentaire,
+                        # le moindre doute interdit la confirmation (fail-closed).
+                        pos_comment = (getattr(p, "comment", "") or "").strip()
+                        if order_comment and pos_comment and pos_comment == order_comment:
+                            confirmed = True
+            except Exception as e:
+                logging.warning(f"[API] Vérification croisée confirmation {req.idem_key!r} : {e}")
+
+            if confirmed:
+                idempotency_store.update_status(
+                    req.idem_key,
+                    ORDER_STATUS_CONFIRMED,
+                    ticket=author_ticket,
+                    confirmed_at=time.time(),
+                )
+            else:
+                idempotency_store.update_status(
+                    req.idem_key,
+                    ORDER_STATUS_INDETERMINATE,
+                    ticket=author_ticket,
+                    reason="cross-check confirmation failed",
+                )
 
     # 4. Journalisation dans l'AuditTrail (MiFID II)
     try:
@@ -1176,6 +1694,122 @@ def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
         logging.error(f"[API] Erreur AuditTrail pour ordre manuel : {e}")
 
     return result
+
+
+class OrderStatusRequest(BaseModel):
+    idem_key: str
+
+
+@app.get("/trade/status/{idem_key}")
+def get_trade_status(idem_key: str, api_key: str = Depends(verify_api_key)):
+    """Interroge l'état d'un ordre soumis avec idem_key.
+
+    - PROCÉDURE b) du verrouillage : un ordre INDETERMINATE ne peut passer CONFIRMED
+      qu'après réconciliation multi-facteurs stricte (critères a–g). Tant qu'un doute
+      subsiste, la réponse est HTTP 504 (INDETERMINATE).
+    """
+    if not idem_key:
+        raise HTTPException(status_code=422, detail="idem_key requis")
+
+    rec = idempotency_store.get(idem_key)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Aucun ordre enregistré pour idem_key {idem_key!r}")
+
+    # Réconciliation active : tente de confirmer un ordre resté INDETERMINATE en vérifiant
+    # les critères a–g sur les positions réelles du broker (jamais d'adoption au magic seul).
+    status = rec.get("status")
+    if status == ORDER_STATUS_INDETERMINATE and _engine:
+        try:
+            from core.interfaces import OrderType as _OT
+
+            direction = (rec.get("direction") or "").upper()
+            order_type = _OT.BUY if direction == "BUY" else (_OT.SELL if direction == "SELL" else None)
+            expected_magic = rec.get("magic")
+            expected_comment = rec.get("order_comment", "")
+            expected_symbol = rec.get("symbol")
+            expected_volume = float(rec.get("volume") or 0.0)
+            pre_tickets = rec.get("pre_existing_tickets") or []
+            pre_snapshot_ok = bool(rec.get("pre_snapshot_ok"))
+
+            # INTERDIT si le snapshot pré-ordre n'a pas pu être capturé avec certitude
+            if expected_magic is None or expected_magic <= 0 or direction is None or not pre_snapshot_ok:
+                idempotency_store.update_status(
+                    idem_key, ORDER_STATUS_INDETERMINATE,
+                    reason="filtre permissif interdit (magic/direction/pre_snapshot_ok non fiables)",
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"INDETERMINATE : conditions de réconciliation non réunies pour {idem_key!r}.",
+                )
+
+            positions = _engine.connector.get_positions(expected_symbol) or []
+            matching = [
+                p for p in positions
+                if (p.symbol.replace("#", "").upper() == expected_symbol.replace("#", "").upper())
+                and p.type == order_type
+                and abs(float(p.volume) - expected_volume) < 1e-6
+                and p.magic == expected_magic
+                and int(p.ticket) not in (pre_tickets or [])
+            ]
+            if len(matching) != 1:
+                # peut-être un état transitoire : on n'archive rien, on reste INDETERMINATE
+                idempotency_store.update_status(
+                    idem_key, ORDER_STATUS_INDETERMINATE,
+                    reason=f"{len(matching)} positions candidates (unicité non garantie)",
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"INDETERMINATE : {len(matching)} positions correspondent — confirmation refusée (critères a–g).",
+                )
+
+            pos = matching[0]
+            pos_comment = (getattr(pos, "comment", "") or "").strip()
+            # Critère f) strict : commentaire attendu = commentaire broker (omission -> doute -> 504)
+            if not expected_comment or not pos_comment or pos_comment != expected_comment:
+                idempotency_store.update_status(
+                    idem_key, ORDER_STATUS_INDETERMINATE,
+                    reason="commentaire broker manquant ou divergent",
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"INDETERMINATE : commentaire de la position ({pos_comment!r}) != attendu ({expected_comment!r}).",
+                )
+
+            idempotency_store.update_status(
+                idem_key,
+                ORDER_STATUS_CONFIRMED,
+                ticket=int(pos.ticket),
+                confirmed_at=time.time(),
+            )
+            status = ORDER_STATUS_CONFIRMED
+            rec = idempotency_store.get(idem_key)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logging.error(f"[API] Réconciliation {idem_key!r} : {e}")
+            raise HTTPException(
+                status_code=504,
+                detail=f"INDETERMINATE : réconciliation impossible ({e}).",
+            )
+
+    if rec.get("status") == ORDER_STATUS_CONFIRMED:
+        return {
+            "status": ORDER_STATUS_CONFIRMED,
+            "idem_key": idem_key,
+            "ticket": rec.get("ticket"),
+            "symbol": rec.get("symbol"),
+            "direction": rec.get("direction"),
+            "volume": rec.get("volume"),
+            "confirmed_at": rec.get("confirmed_at"),
+        }
+
+    if rec.get("status") in (ORDER_STATUS_FAILED,):
+        raise HTTPException(status_code=410, detail=f"Ordre {idem_key!r} définitivement échoué/introuvable.")
+
+    raise HTTPException(
+        status_code=504,
+        detail=f"INDETERMINATE : ordre {idem_key!r} non confirmable à ce stade.",
+    )
 
 
 class CloseRequest(BaseModel):

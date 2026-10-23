@@ -7,6 +7,23 @@ from unittest.mock import MagicMock
 from core.interfaces import OrderType, PositionInfo, AccountInfo
 from application.engine import Engine
 
+def _pos(ticket, symbol="EURUSD", order_type=OrderType.BUY, volume=0.05, magic=10001, comment="ms_key"):
+    return PositionInfo(
+        ticket=ticket,
+        symbol=symbol,
+        type=order_type,
+        volume=volume,
+        open_price=1.0850,
+        current_price=1.0855,
+        sl=1.0800,
+        tp=1.0900,
+        profit=25.0,
+        time=1005,
+        magic=magic,
+        comment=comment
+    )
+
+
 @pytest.fixture
 def mock_engine():
     connector = MagicMock()
@@ -36,25 +53,16 @@ async def test_reconcile_orphan_order_success(mock_engine):
         'sl_price': 1.0800,
         'tp_price': 1.0900,
         'magic': 10001,
+        'order_comment': 'ms_key',
+        'pre_snapshot_ok': True,
+        'pre_existing_tickets': [],
         'retries': 0,
         'timeout_at': 1000.0
     }
     mock_engine._pending_reconciliation.append(payload)
 
     # Simuler l'apparition de la position chez le broker (ordre exécuté malgré le timeout)
-    discovered_pos = PositionInfo(
-        ticket=777123,
-        symbol="EURUSD",
-        type=OrderType.BUY,
-        volume=0.05,
-        open_price=1.0850,
-        current_price=1.0855,
-        sl=1.0800,
-        tp=1.0900,
-        profit=25.0,
-        time=1005,
-        magic=10001
-    )
+    discovered_pos = _pos(777123, comment="ms_key")
     mock_engine.state_manager._positions = [discovered_pos]
 
     # Exécution de la réconciliation
@@ -79,6 +87,9 @@ async def test_reconcile_orphan_order_abandonment_after_retries(mock_engine):
         'sl_price': 1.3000,
         'tp_price': 1.2800,
         'magic': 10002,
+        'order_comment': 'ms_sell',
+        'pre_snapshot_ok': True,
+        'pre_existing_tickets': [],
         'retries': 0,
         'timeout_at': time.time()
     }
@@ -110,6 +121,9 @@ async def test_reconcile_orphan_order_abandonment_after_time_elapsed(mock_engine
         'sl_price': 1.0800,
         'tp_price': 1.0900,
         'magic': 10001,
+        'order_comment': 'ms_key',
+        'pre_snapshot_ok': True,
+        'pre_existing_tickets': [],
         'retries': 0,
         'timeout_at': time.time() - 20.0
     }
@@ -131,25 +145,16 @@ async def test_do_not_reconcile_already_known_ticket(mock_engine):
         'sl_price': 1.0800,
         'tp_price': 1.0900,
         'magic': 10001,
+        'order_comment': 'ms_key',
+        'pre_snapshot_ok': True,
+        'pre_existing_tickets': [],
         'retries': 0,
         'timeout_at': time.time()
     }
     mock_engine._pending_reconciliation.append(payload)
 
     # Position déjà connue chez le broker
-    existing_pos = PositionInfo(
-        ticket=999111,
-        symbol="EURUSD",
-        type=OrderType.BUY,
-        volume=0.05,
-        open_price=1.0850,
-        current_price=1.0855,
-        sl=1.0800,
-        tp=1.0900,
-        profit=25.0,
-        time=1005,
-        magic=10001
-    )
+    existing_pos = _pos(999111, comment="ms_key")
     mock_engine.state_manager._positions = [existing_pos]
 
     # Exécution de la réconciliation : ne doit pas l'adopter à nouveau

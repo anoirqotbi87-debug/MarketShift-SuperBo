@@ -164,11 +164,12 @@ class MT5Connector(IBrokerConnector):
                 tp=p.tp,
                 profit=p.profit,
                 time=p.time,
-                magic=p.magic
+                magic=p.magic,
+                comment=getattr(p, "comment", "") or ""
             ) for p in positions
         ]
 
-    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
+    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0, comment: str = "") -> Optional[Dict[str, Any]]:
         if not self.connected: return None
         real_sym = self.resolve_symbol(symbol)
         if not real_sym:
@@ -213,7 +214,7 @@ class MT5Connector(IBrokerConnector):
             "tp": float(tp),
             "deviation": 20,
             "magic": magic,
-            "comment": "MarketShift SuperBot",
+            "comment": comment or "MarketShift SuperBot",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }

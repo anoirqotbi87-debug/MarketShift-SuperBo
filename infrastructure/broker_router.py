@@ -120,43 +120,81 @@ class BrokerRouter(IBrokerConnector):
                  return self._active_broker.get_positions(symbol)
         return positions
 
-    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
-        # Capture de l'état initial des tickets sur le broker principal pour éviter tout faux positif
+    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0, comment: str = "") -> Optional[Dict[str, Any]]:
+        # Capture de l'état initial des tickets sur le broker principal pour éviter tout faux positif.
+        # pre_snapshot_ok reste False si la lecture pré-ordre a échoué : la vérification
+        # anti-doublon est alors INTERDITE (aucune adoption à la légère).
         pre_tickets = set()
+        pre_snapshot_ok = not (self._active_broker == self.primary)
         if self._active_broker == self.primary:
             try:
                 positions_before = self.primary.get_positions(symbol)
                 if positions_before:
                     pre_tickets = {p.ticket for p in positions_before}
+                pre_snapshot_ok = True
             except Exception as e:
+                pre_snapshot_ok = False
                 logging.debug(f"[BrokerRouter] Lecture positions pré-ordre: {e}")
 
-        result = self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic)
+        result = self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic, comment)
         if result is None and self._active_broker == self.primary:
-            # Vérification anti-doublon précise : détecter si une NOUVELLE position a été créée
-            try:
-                import time
-                time.sleep(0.15)  # Tolérance de synchronisation réseau broker
-                post_positions = self.primary.get_positions(symbol) or []
-                new_positions = [p for p in post_positions if p.ticket not in pre_tickets]
-                
-                # Filtrer les nouvelles positions correspondant au trade envoyé
-                matching = [
-                    p for p in new_positions
-                    if p.type == order_type and abs(p.volume - volume) < 1e-4 and (magic == 0 or p.magic == magic)
-                ]
-                if matching:
-                    pos = matching[-1]
-                    logging.warning(
-                        f"[BrokerRouter] ⚠️ Ordre sur {symbol} (ticket={pos.ticket}, magic={magic}) "
-                        f"détecté sur le primaire après confirmation tardive/timeout. Évitement du doublon de secours."
-                    )
-                    return {"ticket": pos.ticket, "price": pos.open_price, "volume": pos.volume}
-            except Exception as e:
-                logging.error(f"[BrokerRouter] Erreur vérification anti-doublon: {e}")
+            # Vérification anti-doublon précise : détecter si une NOUVELLE position a été créée.
+            # Strictement interdite si le snapshot pré-ordre n'a pas pu être capturé avec certitude.
+            if not pre_snapshot_ok:
+                logging.warning(
+                    f"[BrokerRouter] Anti-doublon impossible pour {symbol} : snapshot pré-ordre non fiable (fail-closed)."
+                )
+            else:
+                try:
+                    import time
+                    time.sleep(0.15)  # Tolérance de synchronisation réseau broker
+                    post_positions = self.primary.get_positions(symbol) or []
+                    new_positions = [p for p in post_positions if p.ticket not in pre_tickets]
+
+                    # Ne JAMAIS adopter une position manuelle (magic == 0) ni un magic neutre (0).
+                    # Le magic doit être strictement positif et correspondre exactement.
+                    if magic > 0:
+                        # Filtrer les nouvelles positions correspondant au trade envoyé
+                        matching = [
+                            p for p in new_positions
+                            if p.type == order_type
+                            and p.magic == magic
+                            and abs(p.volume - volume) < 1e-4
+                        ]
+                        # Multi-facteurs strict : si le broker a tronqué/omis le commentaire, NE PAS adopter.
+                        # Le moindre doute sur l'identité interdit la réconciliation (fail-closed).
+                        for pos in list(matching):
+                            pos_comment = (getattr(pos, "comment", None) or "").strip()
+                            req_comment = (comment or "").strip()
+                            if not req_comment or not pos_comment or pos_comment != req_comment:
+                                matching.remove(pos)
+                                if pos_comment != req_comment:
+                                    logging.warning(
+                                        f"[BrokerRouter] Ordre {symbol} ticket={pos.ticket} écarté : commentaire "
+                                        f"broker ({pos_comment!r}) != attendu ({req_comment!r})."
+                                    )
+                        if len(matching) == 1:
+                            pos = matching[0]
+                            logging.warning(
+                                f"[BrokerRouter] ⚠️ Ordre sur {symbol} (ticket={pos.ticket}, magic={magic}) "
+                                f"détecté sur le primaire après confirmation tardive/timeout. Évitement du doublon de secours."
+                            )
+                            return {"ticket": pos.ticket, "price": pos.open_price, "volume": pos.volume}
+                        if len(matching) > 1:
+                            logging.error(
+                                f"[BrokerRouter] ⚠️ Ambiguïté : {len(matching)} positions correspondent à l'ordre "
+                                f"{symbol} magic={magic} — AUCUNE adoptée (fail-closed)."
+                            )
+                    else:
+                        logging.warning(
+                            f"[BrokerRouter] Anti-doublon ignoré pour {symbol} : magic=0 interdit "
+                            "(adoption de position manuelle refusée)."
+                        )
+                except Exception as e:
+                    logging.error(f"[BrokerRouter] Erreur vérification anti-doublon: {e}")
 
             if self._switch_to_fallback():
-                return self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic)
+                return self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic, comment)
         return result
 
     def close_position(self, ticket: int) -> bool:
