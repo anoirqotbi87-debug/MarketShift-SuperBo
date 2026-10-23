@@ -41,6 +41,7 @@ class PositionInfo(BaseModel):
     profit: float
     time: int
     magic: int
+    comment: str = ""
 
 class IBrokerConnector(ABC):
     @abstractmethod
@@ -60,7 +61,7 @@ class IBrokerConnector(ABC):
         pass
 
     @abstractmethod
-    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0) -> Optional[Dict[str, Any]]:
+    def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0, comment: str = "") -> Optional[Dict[str, Any]]:
         pass
 
     @abstractmethod

@@ -14,6 +14,8 @@ import logging
 import threading
 import asyncio
 import datetime
+import math
+import uuid
 from typing import Dict, Optional, Any
 import pandas as pd
 
@@ -685,6 +687,58 @@ class Engine:
             df=df
         )
 
+        # 7.0 Contrôles broker Fail-Closed (P2) : tick/quote/volume/stops avant tout envoi
+        #     Un sym_info indisponible a déjà été contourné plus haut (valeurs par défaut) ; ici
+        #     on exige les contrôles réels lorsqu'ils sont OBLIGATOIRES pour la sécurité de l'ordre.
+        if sym_info is not None:
+            try:
+                def _sf(attr: str) -> float:
+                    try:
+                        v = float(getattr(sym_info, attr, 0) or 0)
+                    except (ValueError, TypeError):
+                        return 0.0
+                    return v if math.isfinite(v) else 0.0
+
+                _s_point = _sf('point')
+                _s_tick_size = _sf('trade_tick_size')
+                _s_tick_val = _sf('trade_tick_value')
+                _s_bid = _sf('bid')
+                _s_ask = _sf('ask')
+                _s_stops = _sf('trade_stops_level')
+                _s_freeze = _sf('trade_freeze_level')
+
+                if _s_tick_size <= 0 or _s_tick_val <= 0 or _s_point <= 0:
+                    logging.critical(f"[Engine] 🚨 REJET BROKER FAIL-CLOSED : {symbol} tick size/value/point invalides.")
+                    execution_metrics.record_pretrade_rejection("INVALID_TICK_SIZE")
+                    return
+                if _s_ask <= 0 or _s_bid <= 0 or _s_ask < _s_bid:
+                    logging.critical(f"[Engine] 🚨 REJET BROKER FAIL-CLOSED : {symbol} cotation invalide (ask={_s_ask}, bid={_s_bid}).")
+                    execution_metrics.record_pretrade_rejection("INVALID_QUOTE")
+                    return
+
+                # Distance SL/TP >= max(stops, freeze) * point
+                _min_stop = max(_s_stops, _s_freeze) * _s_point
+                if _min_stop > 0:
+                    _exec_price = _s_ask if validated_signal.direction == OrderType.BUY else _s_bid
+                    if abs(sl_price - _exec_price) < _min_stop:
+                        logging.critical(
+                            f"[Engine] 🚨 REJET BROKER FAIL-CLOSED : SL {sl_price:.5f} trop proche de l'exécution "
+                            f"{_exec_price:.5f} sur {symbol} (min {_min_stop:.5f})."
+                        )
+                        execution_metrics.record_pretrade_rejection("INVALID_STOPS_DISTANCE")
+                        return
+                    if tp_price > 0 and abs(tp_price - _exec_price) < _min_stop:
+                        logging.critical(
+                            f"[Engine] 🚨 REJET BROKER FAIL-CLOSED : TP {tp_price:.5f} trop proche de l'exécution "
+                            f"{_exec_price:.5f} sur {symbol} (min {_min_stop:.5f})."
+                        )
+                        execution_metrics.record_pretrade_rejection("INVALID_STOPS_DISTANCE")
+                        return
+            except Exception as broker_err:
+                logging.critical(f"[Engine] 🚨 REJET BROKER FAIL-CLOSED : Erreur contrôles broker {symbol}: {broker_err}")
+                execution_metrics.record_pretrade_rejection("BROKER_CHECK_FAILURE")
+                return
+
         # 7.1 Garde-fou institutionnel de cohérence des SL/TP (Anti-Aberration & Anti-Fat-Finger)
         try:
             current_close = float(df.iloc[-1]['close'])
@@ -732,13 +786,34 @@ class Engine:
         )
 
         # 8. Exécution de l'ordre (Offload asynchrone Hummingbot-style)
+        order_magic = self._symbol_to_magic(symbol)
+        # Identifiant unique par requête : deux ordres du même symbole (même magic) ne
+        # partagent jamais le même commentaire, ce qui rend le critère f) de la
+        # réconciliation réellement discriminant (point 2 de la revue risque).
+        order_comment = f"ms_{order_magic}_{uuid.uuid4().hex[:8]}"
+        # Snapshot pré-ordre : indispensable aux critères a-g de la réconciliation.
+        # S'il échoue, pre_snapshot_ok=False : l'ordre ne sera jamais réconcilié à la légère.
+        pre_tickets = []
+        pre_snapshot_ok = False
+        try:
+            _pre = self.connector.get_positions(symbol)
+            if _pre:
+                pre_tickets = sorted({int(p.ticket) for p in _pre})
+            pre_snapshot_ok = True
+        except Exception as _e:
+            pre_snapshot_ok = False
+            logging.warning(f"[Engine] ⚠️ Snapshot pré-ordre indisponible pour {symbol}: {_e}")
+
         payload = {
             'symbol': symbol,
             'direction': validated_signal.direction,
             'volume': volume,
             'sl_price': sl_price,
             'tp_price': tp_price,
-            'magic': self._symbol_to_magic(symbol),
+            'magic': order_magic,
+            'order_comment': order_comment,
+            'pre_snapshot_ok': pre_snapshot_ok,
+            'pre_existing_tickets': list(pre_tickets),
             'metadata': validated_signal.metadata
         }
         await self.order_queue.put(payload)
@@ -1145,7 +1220,8 @@ class Engine:
                             payload['volume'],
                             payload['sl_price'],
                             payload['tp_price'],
-                            payload['magic']
+                            payload.get('magic', 0),
+                            payload.get('order_comment', '')
                         ),
                         timeout=4.0
                     )
@@ -1159,6 +1235,14 @@ class Engine:
                     )
                     payload['timeout_at'] = _t.time()
                     payload['retries'] = 0
+                    # Preuve d'identité multi-facteurs : le magic (strictement positif) et le
+                    # commentaire sont exigés par la réconciliation. Un magic <= 0 ou un
+                    # snapshot pré-ordre non fiable interdit toute adoption ultérieure.
+                    payload['magic'] = payload.get('magic', 0)
+                    payload['order_comment'] = payload.get('order_comment', '')
+                    payload['pre_snapshot_ok'] = payload.get('pre_snapshot_ok', False)
+                    payload['pre_existing_tickets'] = list(payload.get('pre_existing_tickets') or [])
+                    payload['direction'] = payload.get('direction')
                     self._pending_reconciliation.append(payload)
                     self.order_queue.task_done()
                     continue
@@ -1223,6 +1307,12 @@ class Engine:
                 break
             except Exception as e:
                 logging.error(f"[Engine] Erreur Order Routing Worker: {e}")
+                # Ne JAMAIS laisser la file bloquée : un order_queue.join() attendrait pour toujours.
+                # L'ordre est considéré échoué (aucun timeout réseau n'a eu lieu : exception synchrone).
+                try:
+                    self.order_queue.task_done()
+                except Exception:
+                    pass
 
     async def _reconcile_orphan_orders(self):
         """
@@ -1238,15 +1328,53 @@ class Engine:
         for payload in self._pending_reconciliation:
             symbol = payload.get('symbol')
             volume = payload.get('volume', 0.0)
-            
-            # Recherche d'une position correspondante non encore connue
-            matched_pos = None
-            for pos in current_positions:
-                if (pos.symbol == symbol and 
-                    abs(pos.volume - volume) < 1e-4 and 
-                    pos.ticket not in self._known_position_tickets):
-                    matched_pos = pos
-                    break
+
+            # Preuve d'identité multi-facteurs (critères a–g). Le moindre doute interdit l'adoption.
+            expected_magic = int(payload.get('magic', 0) or 0)
+            expected_comment = str(payload.get('order_comment', '') or '').strip()
+            expected_direction = payload.get('direction')
+            pre_snapshot_ok = bool(payload.get('pre_snapshot_ok', False))
+            pre_existing_tickets = set(int(t) for t in (payload.get('pre_existing_tickets') or []))
+
+            # Suppression totale des filtres permissifs :
+            #   - magic == 0 (ou <= 0)              → jamais adopté (position manuelle présumée)
+            #   - direction None                    → jamais adopté
+            #   - snapshot pré-ordre non fiable      → jamais adopté
+            # Un tel ordre reste INDETERMINATE (jamais confirmé, jamais réémis).
+            if expected_magic <= 0 or expected_direction is None or not pre_snapshot_ok:
+                logging.warning(
+                    f"[Engine] 🚫 Adoption REFUSÉE pour {symbol} : magic={expected_magic}, "
+                    f"direction={expected_direction}, pre_snapshot_ok={pre_snapshot_ok} (fail-closed)."
+                )
+                remaining.append(payload)
+                continue
+
+            # Critère g) unicité : il doit y avoir EXACTEMENT 1 position répondant à a–f
+            matching = [
+                pos for pos in current_positions
+                if (pos.symbol.replace('#', '').upper() == str(symbol or '').replace('#', '').upper())   # b)
+                and pos.type == expected_direction                                                          # c)
+                and abs(float(pos.volume) - float(volume)) < 1e-6                                           # d)
+                and int(getattr(pos, 'magic', 0)) == expected_magic                                        # e)
+                and int(pos.ticket) not in pre_existing_tickets                                             # a)
+                and int(pos.ticket) not in self._known_position_tickets
+            ]
+            # Critère f) : commentaire strict — omission/divergence = doute -> refus
+            strict_matching = []
+            for pos in matching:
+                pos_comment = (str(getattr(pos, "comment", "") or "")).strip()
+                if expected_comment and pos_comment and pos_comment == expected_comment:
+                    strict_matching.append(pos)
+
+            if len(strict_matching) == 1:
+                matched_pos = strict_matching[0]
+            else:
+                matched_pos = None
+                if len(matching) > 1:
+                    logging.warning(
+                        f"[Engine] 🚫 Ambiguïté : {len(matching)} positions correspondent à l'ordre "
+                        f"{symbol} magic={expected_magic} — AUCUNE adoptée (critère g)."
+                    )
 
             if matched_pos:
                 self._known_position_tickets.add(matched_pos.ticket)
@@ -1254,7 +1382,7 @@ class Engine:
                     f"[Engine] 👻 Ordre orphelin réconcilié et adopté ! "
                     f"Ticket: {matched_pos.ticket} | Symbole: {matched_pos.symbol} | Volume: {matched_pos.volume}"
                 )
-                
+
                 # Trace d'Audit MiFID II
                 try:
                     from utils.audit_trail import AuditTrail
@@ -1296,4 +1424,5 @@ class Engine:
                     remaining.append(payload)
 
         self._pending_reconciliation = remaining
+
 

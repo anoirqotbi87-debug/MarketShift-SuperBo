@@ -2,6 +2,35 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean
 from infrastructure.database import Base
 import datetime
 
+class IdempotencyRecord(Base):
+    """
+    Verrouillage idempotent des ordres (anti-doublons).
+
+    Chaque soumission POST /trade avec un idem_key unique est persistée ici :
+      - statut PROCESSING -> INDETERMINATE -> CONFIRMED (ou FAILED)
+      - magic déterministe dérivé de l'idem_key (jamais 0)
+      - commentaire d'ordre ms_<idem_key>
+      - snapshot pré-ordre (pre_existing_tickets) + pre_snapshot_ok
+    Un doute quelconque sur l'identité multi-facteurs maintient l'état INDETERMINATE.
+    """
+    __tablename__ = "idempotency_records"
+
+    idem_key = Column(String(128), primary_key=True, index=True)
+    symbol = Column(String, index=True)
+    direction = Column(String)
+    volume = Column(Float)
+    sl_price = Column(Float, nullable=True)
+    tp_price = Column(Float, nullable=True)
+    magic = Column(Integer, default=0)
+    order_comment = Column(String, default="")
+    status = Column(String, default="PROCESSING")  # PROCESSING | INDETERMINATE | CONFIRMED | FAILED
+    ticket = Column(Integer, nullable=True)
+    pre_snapshot_ok = Column(Boolean, default=False)
+    pre_existing_tickets = Column(String, default="")  # JSON list
+    reason = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    confirmed_at = Column(DateTime, nullable=True)
+
 class BrokerAccount(Base):
     """
     Compte de courtage enregistré via l'UI "Comptes Broker".
