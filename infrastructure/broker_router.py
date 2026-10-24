@@ -121,6 +121,17 @@ class BrokerRouter(IBrokerConnector):
         return positions
 
     def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0, comment: str = "") -> Optional[Dict[str, Any]]:
+        # Failover pré-envoi UNIQUEMENT si le primaire est CERTAINEMENT indisponible
+        # (déconnecté avant tout appel à execute_order). Un timeout/exécution ambiguë
+        # (primaire resté connecté, qui a pu exécuter sans répondre dans le délai) ne
+        # justifie JAMAIS une réémission sur le fallback : l'ordre reste INDETERMINATE
+        # (504 réconciliable) plutôt que de risquer une double exécution.
+        if self._active_broker == self.primary and not getattr(self.primary, "connected", True):
+            logging.warning("[BrokerRouter] Primaire déconnecté avant envoi : bascule failover.")
+            if self._switch_to_fallback():
+                return self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic, comment)
+            return None
+
         # Capture de l'état initial des tickets sur le broker principal pour éviter tout faux positif.
         # pre_snapshot_ok reste False si la lecture pré-ordre a échoué : la vérification
         # anti-doublon est alors INTERDITE (aucune adoption à la légère).
@@ -193,8 +204,16 @@ class BrokerRouter(IBrokerConnector):
                 except Exception as e:
                     logging.error(f"[BrokerRouter] Erreur vérification anti-doublon: {e}")
 
-            if self._switch_to_fallback():
-                return self._active_broker.execute_order(symbol, order_type, volume, sl, tp, magic, comment)
+            # Fail-closed strict : aucune position unique prouvée après un timeout du primaire.
+            # L'ordre peut avoir été exécuté mais rester invisible (latence réseau broker) :
+            # on NE réémet JAMAIS. La requête reste sans ticket, l'API la convertit en
+            # 504 INDETERMINATE, réconciliable ensuite via /trade/status.
+            logging.warning(
+                f"[BrokerRouter] Ordre {symbol} NON CONFIRMÉ après timeout primaire : "
+                "aucune réémission (fail-closed INDETERMINATE)."
+            )
+            return None
+
         return result
 
     def close_position(self, ticket: int) -> bool:

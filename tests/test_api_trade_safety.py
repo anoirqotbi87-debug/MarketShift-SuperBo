@@ -355,7 +355,10 @@ def test_broker_router_anti_duplicate_identifies_genuinely_new_position():
 
 
 def test_broker_router_does_not_falsely_match_preexisting_position():
-    """Vérifie qu'une ancienne position ayant le même magic number n'est PAS confondue avec l'ordre expiré."""
+    """Une ancienne position au magic identique n'est jamais confondue avec l'ordre
+    expiré (pas d'adoption) ET aucun ordre n'est réémis sur le fallback : sans preuve
+    d'une nouvelle position UNIQUE, le résultat est None (504 INDETERMINATE
+    réconciliable) — pas de double exécution (Option A fail-closed strict)."""
     from infrastructure.broker_router import BrokerRouter
     from core.interfaces import PositionInfo, OrderType
 
@@ -380,16 +383,15 @@ def test_broker_router_does_not_falsely_match_preexisting_position():
         comment="ms_test_ident"
     )
 
-    # 1er appel (avant ordre) : old_pos existe déjà
-    # execute_order -> None (échec réel)
-    # 2eme appel (après ordre) : toujours seulement old_pos (aucune nouvelle position)
+    # 1er appel (avant ordre) : old_pos existe déjà ; execute_order -> None (timeout) ;
+    # 2e appel (après ordre) : toujours seulement old_pos (aucune nouvelle position).
     primary.get_positions.side_effect = [[old_pos], [old_pos]]
     primary.execute_order.return_value = None
 
     res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456, comment="ms_test_ident")
-    assert res is not None
-    assert res["ticket"] == 999
-    # Le routeur a bien compris que ticket 111 était pré-existant et a basculé proprement sur le fallback
-    fallback.execute_order.assert_called_once_with("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, 123456, "ms_test_ident")
+    # Aucune nouvelle position prouvée : la position 111 pré-existante n'est PAS adoptée
+    # et l'ordre est laissé INDETERMINATE (None -> 504 réconciliable).
+    assert res is None
+    fallback.execute_order.assert_not_called()
 
 
