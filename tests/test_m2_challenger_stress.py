@@ -85,7 +85,8 @@ class StressMockBrokerConnector(IBrokerConnector):
         volume: float,
         sl: float = 0.0,
         tp: float = 0.0,
-        magic: int = 0
+        magic: int = 0,
+        comment: str = ""
     ) -> Optional[Dict[str, Any]]:
         with self._lock:
             if not self.connected:

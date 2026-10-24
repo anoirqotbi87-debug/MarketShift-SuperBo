@@ -137,25 +137,24 @@ class SMCStrategy(StrategyBase):
                             has_macd = True
 
                     if not pd.isna(current_rsi):
-                        # Pour un ACHAT :
-                        # 1. Pas d'achat si RSI déjà en surachat extrême (> 70) -> risque d'épuisement
-                        if current_rsi > 70:
-                            buy_momentum_ok = False
-                        # 2. Si RSI en survente (< 35), NE PAS attraper un couteau qui tombe :
-                        # Exiger une inflexion haussière (RSI qui remonte OU histogramme MACD qui s'améliore)
-                        elif current_rsi < 35:
+                        # Les setups MSS/FVG/OB sont des accélérations de tendance : un RSI extrême
+                        # (>70 achats / <30 ventes) est la signature NORMALE d'un breakout institutionnel
+                        # et ne doit JAMAIS bloquer le signal structurel (sinon on rate la cassure).
+                        # Le garde-fou conservé couvre le cas inverse : RSI déjà en survente pour un
+                        # achat (ou en surachat pour une vente) SANS preuve d'inflexion — on évite
+                        # d'attraper un couteau qui tombe / de vendre un sommet vertical sans fléchissement.
+
+                        # Pour un ACHAT : si RSI en survente (< 35), NE PAS attraper un couteau qui tombe.
+                        # Exiger une inflexion haussière (RSI qui remonte OU histogramme MACD qui s'améliore).
+                        if current_rsi < 35:
                             rsi_inflection = current_rsi >= prev_rsi
                             macd_inflection = has_macd and (current_macd_diff > prev_macd_diff)
                             if not (rsi_inflection or macd_inflection):
                                 buy_momentum_ok = False
 
-                        # Pour une VENTE :
-                        # 1. Pas de vente si RSI déjà en survente extrême (< 30) -> risque de rebond brutal
-                        if current_rsi < 30:
-                            sell_momentum_ok = False
-                        # 2. Si RSI en surachat (> 65), NE PAS vendre un breakout haussier vertical :
-                        # Exiger une inflexion baissière (RSI qui fléchit OU histogramme MACD qui fléchit)
-                        elif current_rsi > 65:
+                        # Pour une VENTE : si RSI en surachat (> 65), NE PAS vendre un breakout vertical.
+                        # Exiger une inflexion baissière (RSI qui fléchit OU histogramme MACD qui fléchit).
+                        if current_rsi > 65:
                             rsi_inflection = current_rsi <= prev_rsi
                             macd_inflection = has_macd and (current_macd_diff < prev_macd_diff)
                             if not (rsi_inflection or macd_inflection):
