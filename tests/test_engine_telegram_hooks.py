@@ -103,7 +103,8 @@ class MockBrokerConnector(IBrokerConnector):
         volume: float,
         sl: float = 0.0,
         tp: float = 0.0,
-        magic: int = 0
+        magic: int = 0,
+        comment: str = ""
     ) -> Optional[Dict[str, Any]]:
         if not self.connected or self.fail_execute_order:
             return None

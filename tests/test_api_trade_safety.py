@@ -10,6 +10,25 @@ from core.interfaces import OrderType, AccountInfo
 def client():
     return TestClient(app)
 
+
+def make_symbol_info(**overrides):
+    """SymbolInfo broker réaliste (champs MT5 nécessaires aux contrôles fail-closed)."""
+    defaults = dict(
+        spread=10,
+        ask=1.0850,
+        bid=1.0848,
+        point=0.00001,
+        trade_tick_size=0.00001,
+        trade_tick_value=1.0,
+        volume_min=0.01,
+        volume_max=100.0,
+        volume_step=0.01,
+        trade_stops_level=10,
+        trade_freeze_level=0,
+    )
+    defaults.update(overrides)
+    return MagicMock(**defaults)
+
 def test_trade_without_sl_returns_422(client):
     with patch.object(Config, "API_SECRET_KEY", "test_key_m01"):
         headers = {"X-API-Key": "test_key_m01"}
@@ -62,7 +81,7 @@ def test_trade_with_sl_price_executes_with_stop_loss(client):
                 server="DemoServer"
             )
             mock_engine.state_manager.positions = []
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info()
             mock_engine._get_pip_size.return_value = 0.0001
             mock_engine._get_pip_value.return_value = 10.0
 
@@ -87,7 +106,9 @@ def test_trade_with_sl_price_executes_with_stop_loss(client):
                 OrderType.BUY,
                 0.05,
                 sl=1.0810,
-                tp=1.0920
+                tp=1.0920,
+                magic=0,
+                comment=''
             )
 
 def test_trade_with_sl_pips_computes_prices_and_logs_audit(client):
@@ -115,7 +136,7 @@ def test_trade_with_sl_pips_computes_prices_and_logs_audit(client):
                 server="DemoServer"
             )
             mock_engine.state_manager.positions = []
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=8)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info(spread=8)
             mock_engine._get_pip_value.return_value = 10.0
 
             res = client.post(
@@ -137,7 +158,9 @@ def test_trade_with_sl_pips_computes_prices_and_logs_audit(client):
                 OrderType.BUY,
                 0.01,
                 sl=1.0830,
-                tp=1.0890
+                tp=1.0890,
+                magic=0,
+                comment=''
             )
 
 
@@ -158,7 +181,7 @@ def test_trade_excessive_risk_rejected_on_standard_account(client):
                 server="DemoServer"
             )
             mock_engine.state_manager.positions = []
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info()
             mock_engine._get_pip_size.return_value = 0.0001
             mock_engine._get_pip_value.return_value = 10.0
 
@@ -197,7 +220,7 @@ def test_trade_micro_account_tolerates_micro_lot(client):
                 server="DemoServer"
             )
             mock_engine.state_manager.positions = []
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info()
             mock_engine._get_pip_size.return_value = 0.0001
             mock_engine._get_pip_value.return_value = 10.0
 
@@ -235,7 +258,7 @@ def test_trade_micro_account_blocks_excessive_risk(client):
                 server="DemoServer"
             )
             mock_engine.state_manager.positions = []
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10, ask=1.0850, bid=1.0848)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info()
             mock_engine._get_pip_size.return_value = 0.0001
             mock_engine._get_pip_value.return_value = 10.0
 
@@ -283,7 +306,7 @@ def test_trade_fail_closed_when_risk_cannot_be_calculated(client):
             assert "Fail-Closed" in res.json().get("detail", "")
 
             # Cas 2 : Valeur de pip invalide (0.0) -> Doit refuser l'ordre (Fail-Closed)
-            mock_engine.connector.get_symbol_info.return_value = MagicMock(spread=10)
+            mock_engine.connector.get_symbol_info.return_value = make_symbol_info()
             mock_engine._get_pip_size.return_value = 0.0001
             mock_engine._get_pip_value.return_value = 0.0
             res2 = client.post(
@@ -315,7 +338,8 @@ def test_broker_router_anti_duplicate_identifies_genuinely_new_position():
         tp=1.0900,
         profit=0.0,
         time=1000,
-        magic=123456
+        magic=123456,
+        comment="ms_test_ident"
     )
 
     # 1er appel à get_positions (avant ordre) -> vide
@@ -324,14 +348,17 @@ def test_broker_router_anti_duplicate_identifies_genuinely_new_position():
     primary.get_positions.side_effect = [[], [new_pos]]
     primary.execute_order.return_value = None
 
-    res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456)
+    res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456, comment="ms_test_ident")
     assert res is not None
     assert res["ticket"] == 888
     fallback.execute_order.assert_not_called()
 
 
 def test_broker_router_does_not_falsely_match_preexisting_position():
-    """Vérifie qu'une ancienne position ayant le même magic number n'est PAS confondue avec l'ordre expiré."""
+    """Une ancienne position au magic identique n'est jamais confondue avec l'ordre
+    expiré (pas d'adoption) ET aucun ordre n'est réémis sur le fallback : sans preuve
+    d'une nouvelle position UNIQUE, le résultat est None (504 INDETERMINATE
+    réconciliable) — pas de double exécution (Option A fail-closed strict)."""
     from infrastructure.broker_router import BrokerRouter
     from core.interfaces import PositionInfo, OrderType
 
@@ -352,19 +379,19 @@ def test_broker_router_does_not_falsely_match_preexisting_position():
         tp=1.0880,
         profit=3.0,
         time=500,
-        magic=123456
+        magic=123456,
+        comment="ms_test_ident"
     )
 
-    # 1er appel (avant ordre) : old_pos existe déjà
-    # execute_order -> None (échec réel)
-    # 2eme appel (après ordre) : toujours seulement old_pos (aucune nouvelle position)
+    # 1er appel (avant ordre) : old_pos existe déjà ; execute_order -> None (timeout) ;
+    # 2e appel (après ordre) : toujours seulement old_pos (aucune nouvelle position).
     primary.get_positions.side_effect = [[old_pos], [old_pos]]
     primary.execute_order.return_value = None
 
-    res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456)
-    assert res is not None
-    assert res["ticket"] == 999
-    # Le routeur a bien compris que ticket 111 était pré-existant et a basculé proprement sur le fallback
-    fallback.execute_order.assert_called_once_with("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, 123456)
+    res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456, comment="ms_test_ident")
+    # Aucune nouvelle position prouvée : la position 111 pré-existante n'est PAS adoptée
+    # et l'ordre est laissé INDETERMINATE (None -> 504 réconciliable).
+    assert res is None
+    fallback.execute_order.assert_not_called()
 
 

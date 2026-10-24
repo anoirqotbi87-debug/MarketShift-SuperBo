@@ -219,6 +219,7 @@ class MetaApiConnector(IBrokerConnector):
                           if not isinstance(pos.get("time"), (int, float))
                           else pos.get("time", 0)),
                 magic=int(pos.get("magic", 0)),
+                comment=str(pos.get("comment") or ""),
             ))
         return result
 
@@ -232,6 +233,7 @@ class MetaApiConnector(IBrokerConnector):
         sl: float = 0.0,
         tp: float = 0.0,
         magic: int = 0,
+        comment: str = "",
     ) -> Optional[Dict[str, Any]]:
         """
         Exécute un ordre de marché via MetaApi.
@@ -250,7 +252,7 @@ class MetaApiConnector(IBrokerConnector):
             return None
 
         try:
-            return _run_async(self._async_execute_order(symbol, order_type, volume, sl, tp, magic))
+            return _run_async(self._async_execute_order(symbol, order_type, volume, sl, tp, magic, comment))
         except ValueError:
             raise  # Re-raise ValueError (M-01) sans encapsuler
         except Exception as exc:
@@ -265,6 +267,7 @@ class MetaApiConnector(IBrokerConnector):
         sl: float,
         tp: float,
         magic: int,
+        comment: str = "",
     ) -> Optional[Dict[str, Any]]:
         import time
         start_ts = time.perf_counter()
@@ -275,7 +278,7 @@ class MetaApiConnector(IBrokerConnector):
             "actionType": action_type,
             "volume": volume,
             "stopLoss": sl,
-            "comment": f"MSB-magic{magic}",
+            "comment": comment or f"MSB-magic{magic}",
         }
         if tp and tp > 0.0:
             order_params["takeProfit"] = tp
