@@ -356,15 +356,15 @@ def test_broker_router_does_not_falsely_match_preexisting_position():
     )
 
     # 1er appel (avant ordre) : old_pos existe déjà
-    # execute_order -> None (échec réel)
-    # 2eme appel (après ordre) : toujours seulement old_pos (aucune nouvelle position)
+    # execute_order -> None (timeout ambigu)
+    # 2e appel (après ordre) : toujours seulement old_pos (aucune nouvelle position)
     primary.get_positions.side_effect = [[old_pos], [old_pos]]
     primary.execute_order.return_value = None
 
     res = router.execute_order("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, magic=123456)
-    assert res is not None
-    assert res["ticket"] == 999
-    # Le routeur a bien compris que ticket 111 était pré-existant et a basculé proprement sur le fallback
-    fallback.execute_order.assert_called_once_with("EURUSD", OrderType.BUY, 0.01, 1.0800, 1.0900, 123456)
+    # Aucune nouvelle position prouvée : la position 111 pré-existante n'est PAS adoptée
+    # et l'ordre est laissé INDETERMINATE (None -> 504 réconciliable) — pas de double exécution.
+    assert res is None
+    fallback.execute_order.assert_not_called()
 
 
