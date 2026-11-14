@@ -819,7 +819,12 @@ class Engine:
         # EXEC-01 : aucun nouvel ordre ne doit entrer en file après activation du
         # KillSwitch (l'admission finale reste de toute façon contrôlée par la
         # barrière atomique du worker).
-        if self.kill_switch.is_triggered:
+        # Estampillage atomique : contrôle de l'état d'urgence et lecture de la
+        # génération dans la même section critique. Une activation ou un
+        # réarmement survenu entre cet appel et la mise en file rend l'estampille
+        # périmée, donc l'ordre sera refusé au démarrage.
+        emission_epoch = self.kill_switch.stamp_emission_epoch()
+        if emission_epoch is None:
             logging.critical(
                 f"[Engine] 🛑 Ordre {validated_signal.direction.name} {volume} sur {symbol} "
                 "NON mis en file : KillSwitch actif."
@@ -840,7 +845,7 @@ class Engine:
             'metadata': validated_signal.metadata,
             # Génération d'émission : un payload produit avant une activation (ou
             # avant un réarmement) est refusé par la barrière, même déjà dépilé.
-            'emission_epoch': self.kill_switch.emission_epoch,
+            'emission_epoch': emission_epoch,
         }
         await self.order_queue.put(payload)
         logging.info(f"[Engine] ⚡ Ordre {validated_signal.direction.name} {volume} sur {symbol} mis en queue de routage asynchrone.")
@@ -1235,48 +1240,55 @@ class Engine:
         """
         logging.info("[Engine] ⚡ Order Routing Worker démarré.")
         while self.running:
-            _emission_open = False
             try:
                 # Attend un ordre de la queue
                 payload = await self.order_queue.get()
 
                 # ── Barrière d'émission EXEC-01 ───────────────────────────────
-                admitted, verdict = self.kill_switch.try_begin_emission(
-                    payload.get('emission_epoch')
-                )
-                if not admitted:
-                    payload['neutralized_reason'] = verdict
-                    self._neutralized_orders.append(payload)
-                    execution_metrics.record_pretrade_rejection(verdict)
-                    logging.critical(
-                        f"[Engine] 🛑 Émission BLOQUÉE pour {payload.get('symbol')} "
-                        f"({verdict}) — aucun appel broker n'a été engagé."
-                    )
-                    self.order_queue.task_done()
-                    continue
-
-                execution_metrics.record_order_attempt()
+                # Le point de linéarisation est le démarrage de l'appel dans le
+                # thread, pas l'admission côté worker : le contrôle et l'appel
+                # execute_order() sont dans la même fonction exécutée en thread.
+                emission_id = f"em_{uuid.uuid4().hex}"
+                payload['emission_id'] = emission_id
                 _t_start = time.perf_counter()
-                _emission_open = True
+                _timeout = float(getattr(self, '_order_execution_timeout', 4.0))
 
-                # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent) — timeout 4s strict
+                # Les valeurs sont liées en arguments par défaut : le thread peut
+                # survivre à l'itération de boucle qui l'a lancé, une capture
+                # tardive utiliserait l'emission_id d'un ordre suivant.
+                def _start_then_execute(_emission_id=emission_id, _payload=payload):
+                    admitted, verdict = self.kill_switch.begin_emission_in_thread(
+                        _emission_id, _payload.get('emission_epoch')
+                    )
+                    if not admitted:
+                        return {'__emission_rejected__': verdict}
+                    try:
+                        return self.connector.execute_order(
+                            _payload['symbol'],
+                            _payload['direction'],
+                            _payload['volume'],
+                            _payload['sl_price'],
+                            _payload['tp_price'],
+                            _payload.get('magic', 0),
+                            _payload.get('order_comment', '')
+                        )
+                    finally:
+                        # Clôture uniquement à la terminaison RÉELLE du thread,
+                        # et pour CETTE émission précisément.
+                        self.kill_switch.finish_emission(_emission_id, 'TERMINATED')
+
+                # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent) — timeout strict
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            self.connector.execute_order,
-                            payload['symbol'],
-                            payload['direction'],
-                            payload['volume'],
-                            payload['sl_price'],
-                            payload['tp_price'],
-                            payload.get('magic', 0),
-                            payload.get('order_comment', '')
-                        ),
-                        timeout=4.0
+                        asyncio.to_thread(_start_then_execute),
+                        timeout=_timeout
                     )
                 except asyncio.TimeoutError:
-                    # Le timeout de la coroutine n'arrête PAS le thread déjà lancé :
-                    # l'appel reste INDETERMINATE (ni rejet, ni annulation).
+                    # Le timeout de la coroutine n'arrête PAS le thread : l'émission
+                    # est marquée abandonnée mais reste comptée en vol et suivie
+                    # jusqu'à sa terminaison réelle (INDETERMINATE, ni rejet ni
+                    # annulation).
+                    self.kill_switch.mark_abandoned(emission_id)
                     payload['emission_state'] = 'INDETERMINATE_IN_FLIGHT'
                     payload['kill_switch_triggered'] = self.kill_switch.is_triggered
                     self._abandoned_emissions.append(payload)
@@ -1284,8 +1296,9 @@ class Engine:
                     execution_metrics.record_order_execution(_latency_ms, success=False)
                     import time as _t
                     logging.warning(
-                        f"[Engine] ⏱️ Timeout (4s) sur exécution ordre {payload['symbol']} — "
-                        "mise en attente dans la file de réconciliation des ordres orphelins."
+                        f"[Engine] ⏱️ Timeout ({_timeout}s) sur exécution ordre {payload['symbol']} — "
+                        "appel broker INDETERMINATE, thread toujours suivi, mise en attente dans "
+                        "la file de réconciliation."
                     )
                     payload['timeout_at'] = _t.time()
                     payload['retries'] = 0
@@ -1298,14 +1311,37 @@ class Engine:
                     payload['pre_existing_tickets'] = list(payload.get('pre_existing_tickets') or [])
                     payload['direction'] = payload.get('direction')
                     self._pending_reconciliation.append(payload)
-                    # Le thread broker peut continuer à tourner : l'émission est
-                    # clôturée côté worker mais reste suivie (INDETERMINATE) via
-                    # _abandoned_emissions / _pending_reconciliation. Aucune
-                    # réémission n'est déclenchée.
-                    self.kill_switch.end_emission()
-                    _emission_open = False
                     self.order_queue.task_done()
                     continue
+                except asyncio.CancelledError:
+                    # L'annulation du worker n'arrête pas le thread broker : on
+                    # marque l'abandon sans clôturer un suivi encore actif.
+                    self.kill_switch.mark_abandoned(emission_id)
+                    payload['emission_state'] = 'INDETERMINATE_IN_FLIGHT'
+                    self._abandoned_emissions.append(payload)
+                    logging.critical(
+                        f"[Engine] ⛔ Worker annulé pendant l'émission {emission_id} "
+                        f"({payload.get('symbol')}) — thread broker toujours suivi."
+                    )
+                    try:
+                        self.order_queue.task_done()
+                    except Exception:
+                        pass
+                    raise
+
+                if isinstance(result, dict) and '__emission_rejected__' in result:
+                    verdict = str(result['__emission_rejected__'])
+                    payload['neutralized_reason'] = verdict
+                    self._neutralized_orders.append(payload)
+                    execution_metrics.record_pretrade_rejection(verdict)
+                    logging.critical(
+                        f"[Engine] 🛑 Émission BLOQUÉE pour {payload.get('symbol')} "
+                        f"({verdict}) — execute_order() n'a jamais été appelée."
+                    )
+                    self.order_queue.task_done()
+                    continue
+
+                execution_metrics.record_order_attempt()
 
                 _latency_ms = (time.perf_counter() - _t_start) * 1000.0
                 if result:
@@ -1361,20 +1397,12 @@ class Engine:
                 else:
                     execution_metrics.record_order_execution(_latency_ms, success=False)
 
-                # Clôture comptable de l'émission admise (l'appel broker est terminé).
-                self.kill_switch.end_emission()
-                _emission_open = False
                 self.order_queue.task_done()
                 
             except asyncio.CancelledError:
-                if _emission_open:
-                    self.kill_switch.end_emission()
                 break
             except Exception as e:
                 logging.error(f"[Engine] Erreur Order Routing Worker: {e}")
-                if _emission_open:
-                    self.kill_switch.end_emission()
-                    _emission_open = False
                 # Ne JAMAIS laisser la file bloquée : un order_queue.join() attendrait pour toujours.
                 # L'ordre est considéré échoué (aucun timeout réseau n'a eu lieu : exception synchrone).
                 try:

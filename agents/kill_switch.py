@@ -20,15 +20,24 @@ class KillSwitch:
         self._lock: threading.RLock = threading.RLock()
 
         # ── Barrière d'émission (EXEC-01) ────────────────────────────────────
-        # Toute émission d'ordre doit être admise par try_begin_emission(), qui
-        # partage ce verrou avec activate()/reset(). Points de linéarisation :
-        #   - l'ordre est admis AVANT l'activation  -> appel déjà engagé, à suivre
-        #     (éventuellement à réconcilier), jamais présenté comme annulé ;
-        #   - l'activation passe AVANT l'admission -> l'émission est refusée,
-        #     même pour un ordre déjà dépilé de la file.
+        # Le point de linéarisation est le DÉMARRAGE EFFECTIF de l'appel broker,
+        # pas l'admission côté worker : begin_emission_in_thread() est appelée
+        # dans le thread d'exécution, juste avant execute_order(), sous ce même
+        # verrou que prennent activate() et reset().
+        #   - l'appel démarre AVANT l'activation  -> il est engagé, suivi jusqu'à
+        #     sa terminaison réelle et jamais présenté comme annulé ;
+        #   - l'activation passe AVANT le démarrage -> execute_order() n'est
+        #     jamais appelée, même si l'ordre a déjà été dépilé.
+        # Le verrou n'est JAMAIS tenu pendant l'appel broker : uniquement autour
+        # du contrôle et de l'enregistrement du démarrage (section critique
+        # courte, sans I/O).
         self._emission_epoch: int = 0
-        self._in_flight_emissions: int = 0
+        self._in_flight_emissions: int = 0          # appels broker réellement en cours
         self._in_flight_at_activation: int = 0
+        self._active_emissions: dict = {}           # emission_id -> infos de suivi
+        self._abandoned_ids: set = set()            # abandonnés AVANT tout démarrage
+        self._abandoned_in_flight: int = 0          # abandonnés par le worker, thread encore actif
+        self._finished_after_abandon: int = 0       # threads terminés APRÈS abandon du worker
         self._neutralizer: Optional[Callable[[str], None]] = None
 
     # ── Barrière d'émission ──────────────────────────────────────────────────
@@ -42,6 +51,7 @@ class KillSwitch:
 
     @property
     def in_flight_emissions(self) -> int:
+        """Nombre d'appels broker démarrés et non encore terminés."""
         with self._lock:
             return self._in_flight_emissions
 
@@ -50,37 +60,112 @@ class KillSwitch:
         with self._lock:
             return self._in_flight_at_activation
 
+    @property
+    def abandoned_in_flight(self) -> int:
+        """Émissions abandonnées par le worker dont le thread tourne encore."""
+        with self._lock:
+            return self._abandoned_in_flight
+
+    @property
+    def finished_after_abandon(self) -> int:
+        with self._lock:
+            return self._finished_after_abandon
+
+    def active_emissions(self) -> dict:
+        """Instantané des appels broker en cours (suivi INDETERMINATE)."""
+        with self._lock:
+            return {k: dict(v) for k, v in self._active_emissions.items()}
+
     def register_neutralizer(self, callback: Optional[Callable[[str], None]]) -> None:
         """Enregistre le callback chargé de neutraliser la file d'ordres en attente."""
         with self._lock:
             self._neutralizer = callback
 
-    def try_begin_emission(self, epoch: Optional[int] = None) -> Tuple[bool, str]:
-        """Point d'entrée atomique de toute émission d'ordre.
+    def stamp_emission_epoch(self) -> Optional[int]:
+        """Estampille un ordre à mettre en file, atomiquement avec le contrôle
+        de l'état d'urgence.
 
-        Retourne (True, "ADMITTED") si l'émission peut commencer, sinon
-        (False, motif). Le motif est l'un de :
-          - "KILL_SWITCH_ACTIVE" : arrêt d'urgence déjà déclenché ;
-          - "STALE_EPOCH"        : payload antérieur à une activation/réarmement.
+        Retourne la génération courante, ou ``None`` si le KillSwitch est déjà
+        activé (l'ordre ne doit jamais entrer en file). Une activation ou un
+        réarmement survenant après cet appel rend l'estampille périmée, donc
+        l'ordre sera refusé au démarrage : aucune génération « fraîche » ne peut
+        être attribuée à un signal produit avant l'arrêt.
         """
+        with self._lock:
+            if self.is_triggered:
+                return None
+            return self._emission_epoch
+
+    def begin_emission_in_thread(
+        self,
+        emission_id: str,
+        epoch: Optional[int] = None,
+    ) -> Tuple[bool, str]:
+        """Point de linéarisation : appelée DANS le thread, juste avant
+        ``execute_order()``.
+
+        Sous verrou, cette méthode :
+          1. refuse si le KillSwitch est activé ou si la génération est périmée ;
+          2. refuse si l'émission a été abandonnée avant d'avoir démarré ;
+          3. enregistre sinon le démarrage (compteur + suivi nominatif).
+
+        Retourne (True, "STARTED") ou (False, motif). Motifs :
+          - "KILL_SWITCH_ACTIVE" ;
+          - "STALE_EPOCH" ;
+          - "ABANDONED_BEFORE_START" (timeout/annulation survenu avant le départ).
+        """
+        import time
         with self._lock:
             if self.is_triggered:
                 return False, "KILL_SWITCH_ACTIVE"
             if epoch is not None and int(epoch) != self._emission_epoch:
                 return False, "STALE_EPOCH"
+            if emission_id in self._abandoned_ids:
+                self._abandoned_ids.discard(emission_id)
+                return False, "ABANDONED_BEFORE_START"
             self._in_flight_emissions += 1
-            return True, "ADMITTED"
+            self._active_emissions[emission_id] = {
+                "started_at": time.time(),
+                "epoch": self._emission_epoch,
+                "abandoned": False,
+                "outcome": None,
+            }
+            return True, "STARTED"
 
-    def end_emission(self) -> None:
-        """Clôture comptable d'une émission admise (succès, échec ou timeout).
+    def mark_abandoned(self, emission_id: str) -> None:
+        """Le worker renonce à attendre cette émission (timeout ou annulation).
 
-        Un timeout ne clôt PAS l'appel broker déjà parti dans son thread :
-        l'appelant doit le classer INDETERMINATE et le suivre jusqu'à
-        réconciliation. Cette méthode ne fait que décrémenter le compteur.
+        Un timeout de coroutine n'arrête PAS le thread : si l'appel a démarré, il
+        reste compté en vol et suivi jusqu'à sa terminaison réelle. S'il n'a pas
+        encore démarré, il est marqué pour refus au démarrage — il ne pourra donc
+        jamais partir après coup.
         """
         with self._lock:
+            info = self._active_emissions.get(emission_id)
+            if info is None:
+                self._abandoned_ids.add(emission_id)
+                return
+            if not info.get("abandoned"):
+                info["abandoned"] = True
+                self._abandoned_in_flight += 1
+
+    def finish_emission(self, emission_id: str, outcome: Optional[str] = None) -> None:
+        """Clôture comptable, appelée par le thread à sa terminaison RÉELLE."""
+        with self._lock:
+            info = self._active_emissions.pop(emission_id, None)
+            if info is None:
+                self._abandoned_ids.discard(emission_id)
+                return
             if self._in_flight_emissions > 0:
                 self._in_flight_emissions -= 1
+            if info.get("abandoned"):
+                if self._abandoned_in_flight > 0:
+                    self._abandoned_in_flight -= 1
+                self._finished_after_abandon += 1
+                logging.warning(
+                    f"KillSwitch: émission {emission_id} abandonnée par le worker terminée "
+                    f"tardivement (outcome={outcome}) — suivi clôturé après terminaison réelle."
+                )
 
     def activate(self, reason: str):
         """Active l'arrêt d'urgence et ferme toutes les positions (Article 12 RTS 6)"""
@@ -100,6 +185,8 @@ class KillSwitch:
                     f"KillSwitch: {self._in_flight_at_activation} émission(s) déjà engagée(s) "
                     "au moment de l'activation — suivi/réconciliation requis, aucune annulation supposée."
                 )
+            # Les émissions abandonnées avant démarrage ne doivent jamais partir,
+            # y compris après un réarmement : on conserve leurs identifiants.
             logging.critical(f"⚠️ KILL SWITCH ACTIVÉ ⚠️ Raison: {reason}")
 
             if self._neutralizer:
