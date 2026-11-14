@@ -170,8 +170,10 @@ class Engine:
         self._pending_reconciliation: list = []
         self._known_position_tickets: set = set()
 
-        # EXEC-01 : traçabilité des émissions bloquées par la barrière KillSwitch
-        # et des appels broker abandonnés après timeout (INDETERMINATE, non réémis).
+        # EXEC-01 : traçabilité des ordres refusés par la barrière KillSwitch et
+        # des émissions logiquement admises puis abandonnées par le worker après
+        # timeout/annulation (INDETERMINATE : le thread peut être encore actif,
+        # aucune réémission n'est déclenchée).
         self._neutralized_orders: list = []
         self._abandoned_emissions: list = []
         self._loop = None

@@ -1,7 +1,10 @@
 """EXEC-01 — Barrière d'émission atomique KillSwitch / file d'ordres.
 
-Tests adversariaux déterministes autour du point de linéarisation réel :
-le démarrage de ``connector.execute_order()`` DANS le thread d'exécution.
+Tests adversariaux déterministes autour du point de non-retour LOGIQUE (contrat B) :
+l'admission dans le thread, immédiatement avant l'invocation du connecteur. Ces
+tests ne garantissent ni le démarrage physique de ``execute_order()``, ni la
+transmission réseau : ils garantissent qu'aucune invocation ne commence sans
+admission logique préalable, celle-ci étant refusée après activation.
 
 Couverts :
   - activation entre soumission au pool et admission logique dans le thread ;
@@ -443,14 +446,17 @@ def test_9_invariants_sous_concurrence():
             assert verdict == "KILL_SWITCH_ACTIVE"
 
 
-# ── 10. Fenêtre entre barrière logique et entrée dans le connecteur ─────────
+# ── 10. Fenêtre entre barrière logique et dispatch pré-invocation ───────────
 
 
 def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
     """Contrat de sécurité retenu (option B) : le point de non-retour est le
-    franchissement LOGIQUE de la barrière. Ce test démontre explicitement qu'un
-    appel physique au connecteur peut démarrer APRÈS l'activation si son
-    admission logique la précède, et que l'écart est mesuré, pas supposé nul.
+    franchissement LOGIQUE de la barrière. Ce test démontre explicitement qu'une
+    invocation du connecteur peut avoir lieu APRÈS l'activation si l'admission
+    logique la précède, et il mesure un délai borné : de la sortie de la barrière
+    au dispatch pré-invocation (``gate_to_dispatch_ms``). Ce délai n'est ni une
+    entrée dans ``execute_order()``, ni une transmission réseau, ni un résultat
+    broker.
     """
     class _DispatchProbeConnector(_BlockingConnector):
         """Note la valeur de la télémétrie au moment où l'appel CONNECTEUR entre."""
@@ -499,7 +505,7 @@ def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
             allow_entry.set()
 
             assert await _await_until(connector.entered.is_set, timeout=5.0), (
-                "avec le contrat B, l'appel physique démarre bien après l'activation"
+                "contrat B : l'invocation du connecteur a bien lieu après l'activation"
             )
 
             connector.release.set()

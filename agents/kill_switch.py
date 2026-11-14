@@ -17,7 +17,9 @@ class KillSwitch:
         self.notifier = notifier if notifier is not None else telegram_notifier
         self.is_triggered: bool = False
         self.activated_at: float = 0.0
-        # RLock : activate() appelle le neutraliseur (callback moteur) sous verrou.
+        # RLock : verrou unique de la barrière d'émission. activate()/reset() ne
+        # le tiennent que pour l'état atomique ; neutraliseur, comptage/fermeture
+        # des positions et notifications sont exécutés HORS verrou.
         self._lock: threading.RLock = threading.RLock()
 
         # ── Barrière d'émission (EXEC-01) ────────────────────────────────────
@@ -106,7 +108,11 @@ class KillSwitch:
             return self._last_gate_to_dispatch_ms
 
     def active_emissions(self) -> dict:
-        """Instantané des appels broker en cours (suivi INDETERMINATE)."""
+        """Instantané des émissions logiquement admises et non encore clôturées.
+
+        Une entrée ici ne prouve ni invocation du connecteur, ni transmission
+        réseau : elle prouve seulement que l'admission logique a eu lieu (contrat B).
+        """
         with self._lock:
             return {k: dict(v) for k, v in self._active_emissions.items()}
 
@@ -135,8 +141,8 @@ class KillSwitch:
         emission_id: str,
         epoch: Optional[int] = None,
     ) -> Tuple[bool, str]:
-        """Point de linéarisation : appelée DANS le thread, juste avant
-        ``execute_order()``.
+        """Point de non-retour LOGIQUE : appelée DANS le thread, juste avant
+        l'invocation de ``execute_order()`` (contrat B, pas une garantie physique).
 
         Sous verrou, cette méthode :
           1. refuse si le KillSwitch est activé ou si la génération est périmée ;
