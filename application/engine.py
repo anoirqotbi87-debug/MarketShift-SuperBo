@@ -1260,8 +1260,15 @@ class Engine:
                     admitted, verdict = self.kill_switch.begin_emission_in_thread(
                         _emission_id, _payload.get('emission_epoch')
                     )
+                    # Horodatage immédiat de la sortie de la barrière : sert à
+                    # mesurer l'écart avec l'entrée réelle dans le connecteur.
+                    _gate_exit_at = time.perf_counter()
                     if not admitted:
                         return {'__emission_rejected__': verdict}
+                    # Trace de l'entrée physique dans le connecteur : l'écart avec
+                    # le franchissement logique de la barrière est mesuré, pas
+                    # supposé nul (contrat de sécurité EXEC-01).
+                    self.kill_switch.note_call_entered(_emission_id, _gate_exit_at)
                     try:
                         return self.connector.execute_order(
                             _payload['symbol'],

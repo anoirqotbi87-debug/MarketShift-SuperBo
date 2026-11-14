@@ -441,3 +441,184 @@ def test_9_invariants_sous_concurrence():
     for admis, verdict in resultats:
         if not admis:
             assert verdict == "KILL_SWITCH_ACTIVE"
+
+
+# ── 10. Fenêtre entre barrière logique et entrée dans le connecteur ─────────
+
+
+def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
+    """Contrat de sécurité retenu (option B) : le point de non-retour est le
+    franchissement LOGIQUE de la barrière. Ce test démontre explicitement qu'un
+    appel physique au connecteur peut démarrer APRÈS l'activation si son
+    admission logique la précède, et que l'écart est mesuré, pas supposé nul.
+    """
+    connector = _BlockingConnector()
+    eng = _make_engine(connector)
+    eng._order_execution_timeout = 5.0
+
+    gate_passed = threading.Event()
+    allow_entry = threading.Event()
+    original_note = KillSwitch.note_call_entered
+
+    def gated_note(self, emission_id, gate_exit_at=None):
+        # Bloque exactement entre la sortie de la barrière et l'entrée dans le
+        # connecteur : c'est la fenêtre résiduelle à caractériser.
+        gate_passed.set()
+        allow_entry.wait(10.0)
+        return original_note(self, emission_id, gate_exit_at)
+
+    monkeypatch.setattr(KillSwitch, "note_call_entered", gated_note)
+
+    async def scenario():
+        task = asyncio.create_task(eng._order_routing_worker())
+        try:
+            await eng.order_queue.put(_payload(epoch=eng.kill_switch.stamp_emission_epoch()))
+            assert await _await_until(gate_passed.is_set, timeout=5.0)
+
+            # Activation pendant la fenêtre : aucune barrière ne s'y oppose plus.
+            eng.kill_switch.activate("TEST_10_FENETRE")
+            assert eng.kill_switch.in_flight_at_activation == 1
+            await asyncio.sleep(0.2)   # fenêtre volontairement élargie
+            allow_entry.set()
+
+            assert await _await_until(connector.entered.is_set, timeout=5.0), (
+                "avec le contrat B, l'appel physique démarre bien après l'activation"
+            )
+
+            connector.release.set()
+            assert await _await_until(
+                lambda: eng.kill_switch.in_flight_emissions == 0, timeout=5.0
+            )
+        finally:
+            allow_entry.set()
+            await _stop_worker(eng, task)
+
+    asyncio.run(scenario())
+
+    info = [e for e in eng._abandoned_emissions]
+    assert len(connector.calls) == 1
+    # L'écart barrière -> connecteur est mesuré et non nul : la sémantique est
+    # tracée, elle ne prétend pas à une garantie physique.
+    gap = eng.kill_switch.last_gate_to_call_ms
+    assert gap is not None
+    assert gap >= 100.0, f"écart mesuré trop faible pour être réel : {gap}ms"
+    assert info == []
+
+
+# ── 11/12. Course mark_abandoned() / terminaison du thread ──────────────────
+
+
+def test_11_mark_abandoned_apres_terminaison_thread_ne_laisse_pas_d_entree(monkeypatch):
+    """Le thread se termine AVANT que le worker ne traite le timeout :
+    ``mark_abandoned()`` ne doit laisser aucune entrée terminale."""
+    connector = _BlockingConnector()
+    connector.release.set()          # le thread se termine immédiatement
+    eng = _make_engine(connector)
+    eng._order_execution_timeout = 5.0
+
+    async def fake_wait_for(aw, timeout=None):
+        await aw                     # le thread va jusqu'au bout...
+        raise asyncio.TimeoutError  # ... puis le worker "subit" un timeout
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    async def scenario():
+        task = asyncio.create_task(eng._order_routing_worker())
+        try:
+            await eng.order_queue.put(_payload(epoch=eng.kill_switch.stamp_emission_epoch()))
+            assert await _await_until(
+                lambda: len(eng._pending_reconciliation) == 1, timeout=5.0
+            )
+        finally:
+            await _stop_worker(eng, task)
+
+    asyncio.run(scenario())
+
+    assert len(connector.calls) == 1
+    assert eng.kill_switch.in_flight_emissions == 0
+    assert eng.kill_switch._abandoned_ids == set(), (
+        "aucun identifiant terminal ne doit rester mémorisé"
+    )
+    assert eng.kill_switch.abandoned_in_flight == 0
+
+
+def test_12_mark_abandoned_avant_demarrage_refuse_le_demarrage_ensuite(monkeypatch):
+    """Timeout avant tout démarrage : l'identifiant est mémorisé, puis le
+    démarrage est refusé et l'entrée est nettoyée (pas de fuite)."""
+    connector = _BlockingConnector()
+    eng = _make_engine(connector)
+    eng._order_execution_timeout = 5.0
+
+    async def fake_wait_for(aw, timeout=None):
+        aw.close()                   # le thread n'est jamais lancé
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+
+    async def scenario():
+        task = asyncio.create_task(eng._order_routing_worker())
+        try:
+            await eng.order_queue.put(_payload(epoch=eng.kill_switch.stamp_emission_epoch()))
+            assert await _await_until(
+                lambda: len(eng._pending_reconciliation) == 1, timeout=5.0
+            )
+        finally:
+            await _stop_worker(eng, task)
+
+    asyncio.run(scenario())
+
+    emission_id = eng._pending_reconciliation[0]["emission_id"]
+    assert emission_id in eng.kill_switch._abandoned_ids
+
+    admis, verdict = eng.kill_switch.begin_emission_in_thread(emission_id, None)
+    assert (admis, verdict) == (False, "ABANDONED_BEFORE_START")
+    assert emission_id not in eng.kill_switch._abandoned_ids, "entrée nettoyée au démarrage"
+    assert connector.calls == []
+
+
+# ── 13. activate() ne tient pas le verrou pendant les opérations externes ───
+
+
+def test_13_activate_ne_tient_pas_le_verrou_pendant_operations_externes():
+    class _SlowPositionsConnector:
+        connected = True
+
+        def __init__(self):
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def get_positions(self, *a, **k):
+            self.entered.set()
+            self.release.wait(10.0)
+            return []
+
+        def execute_order(self, *a, **k):  # ne doit jamais être appelé
+            raise AssertionError("aucune émission attendue")
+
+    connector = _SlowPositionsConnector()
+    ks = KillSwitch(connector=connector, notifier=None)
+
+    t = threading.Thread(target=ks.activate, args=("TEST_13",))
+    t.start()
+    try:
+        assert connector.entered.wait(5.0), "activate() doit atteindre les appels externes"
+
+        # Le verrou doit être libre pendant l'appel externe : une tentative
+        # d'émission répond immédiatement, pas après la libération.
+        _t0 = time.perf_counter()
+        admis, verdict = ks.begin_emission_in_thread("probe", None)
+        elapsed = time.perf_counter() - _t0
+
+        assert (admis, verdict) == (False, "KILL_SWITCH_ACTIVE")
+        assert elapsed < 0.5, f"verrou encore tenu pendant l'opération externe ({elapsed:.3f}s)"
+
+        # Et une clôture d'émission depuis un thread broker ne bloque pas non plus.
+        _t0 = time.perf_counter()
+        ks.finish_emission("inconnu", "TERMINATED")
+        assert time.perf_counter() - _t0 < 0.5
+    finally:
+        connector.release.set()
+        t.join(5.0)
+
+    assert ks.is_triggered is True
+    assert ks.in_flight_at_activation == 0

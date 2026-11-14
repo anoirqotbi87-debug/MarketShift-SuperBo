@@ -1,3 +1,4 @@
+import collections
 import logging
 import threading
 from typing import Any, Callable, Optional, Tuple
@@ -38,6 +39,12 @@ class KillSwitch:
         self._abandoned_ids: set = set()            # abandonnés AVANT tout démarrage
         self._abandoned_in_flight: int = 0          # abandonnés par le worker, thread encore actif
         self._finished_after_abandon: int = 0       # threads terminés APRÈS abandon du worker
+        # Identifiants déjà terminés (borne mémoire) : permet à un mark_abandoned()
+        # qui arrive APRÈS la terminaison du thread de ne pas laisser d'entrée
+        # terminale inutile dans _abandoned_ids.
+        self._completed_ids: "collections.OrderedDict[str, None]" = collections.OrderedDict()
+        self._completed_ids_max: int = 2048
+        self._last_gate_to_call_ms: Optional[float] = None
         self._neutralizer: Optional[Callable[[str], None]] = None
 
     # ── Barrière d'émission ──────────────────────────────────────────────────
@@ -70,6 +77,12 @@ class KillSwitch:
     def finished_after_abandon(self) -> int:
         with self._lock:
             return self._finished_after_abandon
+
+    @property
+    def last_gate_to_call_ms(self) -> Optional[float]:
+        """Dernier écart mesuré barrière logique -> entrée réelle connecteur."""
+        with self._lock:
+            return self._last_gate_to_call_ms
 
     def active_emissions(self) -> dict:
         """Instantané des appels broker en cours (suivi INDETERMINATE)."""
@@ -132,6 +145,25 @@ class KillSwitch:
             }
             return True, "STARTED"
 
+    def note_call_entered(self, emission_id: str, gate_exit_at: Optional[float] = None) -> None:
+        """Trace l'entrée effective dans ``execute_order()``.
+
+        Permet de mesurer l'intervalle résiduel entre le franchissement logique
+        de la barrière et l'entrée physique dans le connecteur (contrat B de la
+        revue : le point de non-retour est logique, la mesure rend l'écart
+        observable au lieu de le supposer nul).
+        """
+        import time
+        with self._lock:
+            info = self._active_emissions.get(emission_id)
+            if info is None:
+                return
+            info["call_entered_at"] = time.time()
+            if gate_exit_at is not None:
+                gap_ms = (time.perf_counter() - gate_exit_at) * 1000.0
+                info["gate_to_call_ms"] = gap_ms
+                self._last_gate_to_call_ms = gap_ms
+
     def mark_abandoned(self, emission_id: str) -> None:
         """Le worker renonce à attendre cette émission (timeout ou annulation).
 
@@ -143,6 +175,10 @@ class KillSwitch:
         with self._lock:
             info = self._active_emissions.get(emission_id)
             if info is None:
+                # Le thread a pu se terminer AVANT que le worker ne traite son
+                # timeout : l'identifiant est déjà terminal, ne rien mémoriser.
+                if emission_id in self._completed_ids:
+                    return
                 self._abandoned_ids.add(emission_id)
                 return
             if not info.get("abandoned"):
@@ -156,6 +192,8 @@ class KillSwitch:
             if info is None:
                 self._abandoned_ids.discard(emission_id)
                 return
+            self._abandoned_ids.discard(emission_id)
+            self._remember_completed(emission_id)
             if self._in_flight_emissions > 0:
                 self._in_flight_emissions -= 1
             if info.get("abandoned"):
@@ -167,8 +205,23 @@ class KillSwitch:
                     f"tardivement (outcome={outcome}) — suivi clôturé après terminaison réelle."
                 )
 
+    def _remember_completed(self, emission_id: str) -> None:
+        """Mémorise (de façon bornée) qu'une émission est déjà terminale."""
+        self._completed_ids[emission_id] = None
+        self._completed_ids.move_to_end(emission_id)
+        while len(self._completed_ids) > self._completed_ids_max:
+            self._completed_ids.popitem(last=False)
+
     def activate(self, reason: str):
-        """Active l'arrêt d'urgence et ferme toutes les positions (Article 12 RTS 6)"""
+        """Active l'arrêt d'urgence et ferme toutes les positions (Article 12 RTS 6).
+
+        Le verrou n'est tenu QUE pendant l'établissement atomique de l'état
+        d'urgence (drapeau + invalidation de génération + instantané des
+        émissions en cours). Toutes les opérations externes (neutralisation de
+        la file, comptage/fermeture des positions, notifications) s'exécutent
+        hors verrou : aucune I/O ne peut retarder la barrière d'émission ni
+        bloquer un thread broker qui clôture son émission.
+        """
         with self._lock:
             if self.is_triggered:
                 return
@@ -180,40 +233,42 @@ class KillSwitch:
             # en file (ou estampillé avant l'activation) ne pourra être émis.
             self._emission_epoch += 1
             self._in_flight_at_activation = self._in_flight_emissions
-            if self._in_flight_at_activation:
-                logging.critical(
-                    f"KillSwitch: {self._in_flight_at_activation} émission(s) déjà engagée(s) "
-                    "au moment de l'activation — suivi/réconciliation requis, aucune annulation supposée."
-                )
-            # Les émissions abandonnées avant démarrage ne doivent jamais partir,
-            # y compris après un réarmement : on conserve leurs identifiants.
+            neutralizer = self._neutralizer
+            in_flight_at_activation = self._in_flight_at_activation
             logging.critical(f"⚠️ KILL SWITCH ACTIVÉ ⚠️ Raison: {reason}")
+            if in_flight_at_activation:
+                logging.critical(
+                    f"KillSwitch: {in_flight_at_activation} émission(s) LOGIQUEMENT engagée(s) "
+                    "au moment de l'activation — suivi/réconciliation requis, aucune annulation "
+                    "ni transmission réseau confirmée supposée."
+                )
 
-            if self._neutralizer:
-                try:
-                    self._neutralizer(reason)
-                except Exception as neu_err:
-                    logging.error(f"KillSwitch: Erreur neutralisation file d'ordres: {neu_err}")
-
-            pos_count = 0
+        # ── Hors verrou : opérations externes potentiellement lentes ────────
+        if neutralizer:
             try:
-                if hasattr(self.connector, "get_positions"):
-                    positions = self.connector.get_positions()
-                    pos_count = len(positions) if positions else 0
-            except Exception as e:
-                logging.warning(f"KillSwitch: Impossible de décompter les positions: {e}")
+                neutralizer(reason)
+            except Exception as neu_err:
+                logging.error(f"KillSwitch: Erreur neutralisation file d'ordres: {neu_err}")
 
-            if self.notifier:
-                try:
-                    self.notifier.notify_critical_event(
-                        "KILL_SWITCH",
-                        reason=reason,
-                        details=f"Emergency liquidation triggered: {pos_count} positions closed"
-                    )
-                except Exception as notif_err:
-                    logging.error(f"KillSwitch: Erreur dispatch notification: {notif_err}")
+        pos_count = 0
+        try:
+            if hasattr(self.connector, "get_positions"):
+                positions = self.connector.get_positions()
+                pos_count = len(positions) if positions else 0
+        except Exception as e:
+            logging.warning(f"KillSwitch: Impossible de décompter les positions: {e}")
 
-            self._close_all_positions()
+        if self.notifier:
+            try:
+                self.notifier.notify_critical_event(
+                    "KILL_SWITCH",
+                    reason=reason,
+                    details=f"Emergency liquidation triggered: {pos_count} positions closed"
+                )
+            except Exception as notif_err:
+                logging.error(f"KillSwitch: Erreur dispatch notification: {notif_err}")
+
+        self._close_all_positions()
 
     def _close_all_positions(self):
         """Ferme drastiquement toutes les positions ouvertes"""
