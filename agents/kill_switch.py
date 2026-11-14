@@ -21,19 +21,30 @@ class KillSwitch:
         self._lock: threading.RLock = threading.RLock()
 
         # ── Barrière d'émission (EXEC-01) ────────────────────────────────────
-        # Le point de linéarisation est le DÉMARRAGE EFFECTIF de l'appel broker,
-        # pas l'admission côté worker : begin_emission_in_thread() est appelée
-        # dans le thread d'exécution, juste avant execute_order(), sous ce même
-        # verrou que prennent activate() et reset().
-        #   - l'appel démarre AVANT l'activation  -> il est engagé, suivi jusqu'à
-        #     sa terminaison réelle et jamais présenté comme annulé ;
-        #   - l'activation passe AVANT le démarrage -> execute_order() n'est
-        #     jamais appelée, même si l'ordre a déjà été dépilé.
-        # Le verrou n'est JAMAIS tenu pendant l'appel broker : uniquement autour
-        # du contrôle et de l'enregistrement du démarrage (section critique
-        # courte, sans I/O).
+        # CONTRAT DE SÉCURITÉ (option B, assumée) : le point de non-retour est
+        # LOGIQUE. Il est atteint au franchissement de begin_emission_in_thread(),
+        # appelée dans le thread d'exécution juste avant l'invocation du
+        # connecteur, sous le même verrou que activate() et reset().
+        #
+        # Quatre étapes distinctes, à ne jamais confondre :
+        #   1. admission LOGIQUE (begin_emission_in_thread)  <- point de non-retour
+        #   2. dispatch / tentative d'invocation du connecteur (note_call_dispatch)
+        #   3. transmission réseau (aucune garantie, non instrumentée ici)
+        #   4. résultat broker (retour de execute_order, ou timeout/incertitude)
+        #
+        # Conséquences assumées :
+        #   - admission avant activation  -> émission engagée, suivie jusqu'à sa
+        #     terminaison réelle, jamais présentée comme annulée ;
+        #   - activation avant admission  -> execute_order() n'est jamais invoquée ;
+        #   - un appel peut être INVOQUÉ après l'activation si son admission
+        #     logique la précède : c'est une limite connue, mesurée et documentée,
+        #     pas une garantie physique.
+        # Le verrou n'est JAMAIS tenu pendant l'invocation du connecteur :
+        # uniquement autour du contrôle et de l'enregistrement de l'admission.
         self._emission_epoch: int = 0
-        self._in_flight_emissions: int = 0          # appels broker réellement en cours
+        # Émissions logiquement admises et non encore clôturées (pas
+        # nécessairement des appels réseau physiquement en cours).
+        self._in_flight_emissions: int = 0
         self._in_flight_at_activation: int = 0
         self._active_emissions: dict = {}           # emission_id -> infos de suivi
         self._abandoned_ids: set = set()            # abandonnés AVANT tout démarrage
@@ -44,7 +55,7 @@ class KillSwitch:
         # terminale inutile dans _abandoned_ids.
         self._completed_ids: "collections.OrderedDict[str, None]" = collections.OrderedDict()
         self._completed_ids_max: int = 2048
-        self._last_gate_to_call_ms: Optional[float] = None
+        self._last_gate_to_dispatch_ms: Optional[float] = None
         self._neutralizer: Optional[Callable[[str], None]] = None
 
     # ── Barrière d'émission ──────────────────────────────────────────────────
@@ -58,7 +69,11 @@ class KillSwitch:
 
     @property
     def in_flight_emissions(self) -> int:
-        """Nombre d'appels broker démarrés et non encore terminés."""
+        """Émissions logiquement admises et non encore clôturées.
+
+        Ne signifie pas que l'appel réseau a démarré : la clôture intervient à
+        la terminaison réelle du thread (contrat B).
+        """
         with self._lock:
             return self._in_flight_emissions
 
@@ -79,10 +94,16 @@ class KillSwitch:
             return self._finished_after_abandon
 
     @property
-    def last_gate_to_call_ms(self) -> Optional[float]:
-        """Dernier écart mesuré barrière logique -> entrée réelle connecteur."""
+    def last_gate_to_dispatch_ms(self) -> Optional[float]:
+        """Dernier écart mesuré : sortie de la barrière -> dispatch pré-invocation.
+
+        Ce délai s'arrête AVANT l'invocation de ``connector.execute_order()``.
+        Il ne mesure ni la transmission réseau, ni un début d'exécution dans le
+        connecteur : ces éléments exigeraient une instrumentation interne au
+        connecteur.
+        """
         with self._lock:
-            return self._last_gate_to_call_ms
+            return self._last_gate_to_dispatch_ms
 
     def active_emissions(self) -> dict:
         """Instantané des appels broker en cours (suivi INDETERMINATE)."""
@@ -145,24 +166,26 @@ class KillSwitch:
             }
             return True, "STARTED"
 
-    def note_call_entered(self, emission_id: str, gate_exit_at: Optional[float] = None) -> None:
-        """Trace l'entrée effective dans ``execute_order()``.
+    def note_call_dispatch(self, emission_id: str, gate_exit_at: Optional[float] = None) -> None:
+        """Horodate le DISPATCH : instant juste avant l'invocation du connecteur.
 
-        Permet de mesurer l'intervalle résiduel entre le franchissement logique
-        de la barrière et l'entrée physique dans le connecteur (contrat B de la
-        revue : le point de non-retour est logique, la mesure rend l'écart
-        observable au lieu de le supposer nul).
+        Mesure bornée explicitement :
+          - départ : sortie de ``begin_emission_in_thread()`` (``gate_exit_at``) ;
+          - arrivée : cet appel, exécuté AVANT ``connector.execute_order()``.
+        Ce n'est donc PAS une mesure d'entrée dans le connecteur, ni de
+        transmission réseau, ni de résultat broker. L'écart mesure uniquement le
+        délai de dispatch résiduel du contrat B.
         """
         import time
         with self._lock:
             info = self._active_emissions.get(emission_id)
             if info is None:
                 return
-            info["call_entered_at"] = time.time()
+            info["dispatch_at"] = time.time()
             if gate_exit_at is not None:
                 gap_ms = (time.perf_counter() - gate_exit_at) * 1000.0
-                info["gate_to_call_ms"] = gap_ms
-                self._last_gate_to_call_ms = gap_ms
+                info["gate_to_dispatch_ms"] = gap_ms
+                self._last_gate_to_dispatch_ms = gap_ms
 
     def mark_abandoned(self, emission_id: str) -> None:
         """Le worker renonce à attendre cette émission (timeout ou annulation).

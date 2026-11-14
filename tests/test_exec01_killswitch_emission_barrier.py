@@ -4,7 +4,7 @@ Tests adversariaux déterministes autour du point de linéarisation réel :
 le démarrage de ``connector.execute_order()`` DANS le thread d'exécution.
 
 Couverts :
-  - activation entre soumission au pool et démarrage effectif du thread ;
+  - activation entre soumission au pool et admission logique dans le thread ;
   - activation pendant un appel réellement engagé ;
   - timeout réel de ``asyncio.wait_for()`` avec thread bloqué (compteur conservé) ;
   - activation pendant ce thread bloqué (aucune nouvelle émission) ;
@@ -112,7 +112,7 @@ async def _stop_worker(eng, task):
 
 def test_1_activation_apres_soumission_avant_demarrage_thread(monkeypatch):
     """Le thread est soumis mais pas démarré : l'activation passe avant le
-    démarrage effectif, donc ``execute_order()`` ne doit jamais être appelée."""
+    toute admission logique, donc ``execute_order()`` ne doit jamais être appelée."""
     connector = _BlockingConnector()
     eng = _make_engine(connector)
     eng._order_execution_timeout = 5.0
@@ -452,22 +452,35 @@ def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
     appel physique au connecteur peut démarrer APRÈS l'activation si son
     admission logique la précède, et que l'écart est mesuré, pas supposé nul.
     """
-    connector = _BlockingConnector()
+    class _DispatchProbeConnector(_BlockingConnector):
+        """Note la valeur de la télémétrie au moment où l'appel CONNECTEUR entre."""
+
+        def __init__(self):
+            super().__init__()
+            self.dispatch_ts_at_entry = "ABSENT"
+            self.ks = None
+
+        def execute_order(self, *args, **kwargs):
+            self.dispatch_ts_at_entry = self.ks.last_gate_to_dispatch_ms
+            return super().execute_order(*args, **kwargs)
+
+    connector = _DispatchProbeConnector()
     eng = _make_engine(connector)
+    connector.ks = eng.kill_switch
     eng._order_execution_timeout = 5.0
 
     gate_passed = threading.Event()
     allow_entry = threading.Event()
-    original_note = KillSwitch.note_call_entered
+    original_note = KillSwitch.note_call_dispatch
 
     def gated_note(self, emission_id, gate_exit_at=None):
-        # Bloque exactement entre la sortie de la barrière et l'entrée dans le
-        # connecteur : c'est la fenêtre résiduelle à caractériser.
+        # Bloque exactement entre la sortie de la barrière et le dispatch
+        # pré-invocation : c'est la fenêtre résiduelle à caractériser.
         gate_passed.set()
         allow_entry.wait(10.0)
         return original_note(self, emission_id, gate_exit_at)
 
-    monkeypatch.setattr(KillSwitch, "note_call_entered", gated_note)
+    monkeypatch.setattr(KillSwitch, "note_call_dispatch", gated_note)
 
     async def scenario():
         task = asyncio.create_task(eng._order_routing_worker())
@@ -478,6 +491,10 @@ def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
             # Activation pendant la fenêtre : aucune barrière ne s'y oppose plus.
             eng.kill_switch.activate("TEST_10_FENETRE")
             assert eng.kill_switch.in_flight_at_activation == 1
+            # Aucune télémétrie de dispatch n'existe encore, et le connecteur
+            # n'a pas été invoqué : la mesure est bien PRÉ-invocation.
+            assert connector.calls == []
+            assert eng.kill_switch.last_gate_to_dispatch_ms is None
             await asyncio.sleep(0.2)   # fenêtre volontairement élargie
             allow_entry.set()
 
@@ -497,11 +514,12 @@ def test_10_fenetre_barriere_vers_connecteur_mesuree_et_documentee(monkeypatch):
 
     info = [e for e in eng._abandoned_emissions]
     assert len(connector.calls) == 1
-    # L'écart barrière -> connecteur est mesuré et non nul : la sémantique est
-    # tracée, elle ne prétend pas à une garantie physique.
-    gap = eng.kill_switch.last_gate_to_call_ms
-    assert gap is not None
-    assert gap >= 100.0, f"écart mesuré trop faible pour être réel : {gap}ms"
+    # La télémétrie est déjà renseignée quand le connecteur commence : elle est
+    # écrite AVANT l'invocation, elle ne prétend donc pas mesurer l'entrée dans
+    # execute_order() (contrat B, mesure de dispatch).
+    assert connector.dispatch_ts_at_entry != "ABSENT"
+    gap = eng.kill_switch.last_gate_to_dispatch_ms
+    assert gap is not None and gap >= 100.0, f"écart de dispatch non mesuré : {gap}ms"
     assert info == []
 
 

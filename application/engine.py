@@ -1233,10 +1233,13 @@ class Engine:
         Worker asynchrone (Hummingbot-style).
         Dépile les ordres de la file et les exécute sans bloquer la boucle principale.
 
-        EXEC-01 : le worker ne peut plus commencer un appel broker sans avoir été
-        admis par la barrière atomique du KillSwitch. L'admission est acquise sous
-        le verrou partagé avec activate()/reset(), ce qui ferme la fenêtre de
-        concurrence entre « dépiler » et « engager l'appel ».
+        EXEC-01 (contrat B, point de non-retour LOGIQUE) : aucun ordre ne peut
+        être invoqué sur le connecteur sans avoir franchi la barrière atomique du
+        KillSwitch, sous le verrou partagé avec activate()/reset(). Le
+        franchissement est acquis dans le thread, immédiatement avant l'invocation
+        du connecteur ; il ferme la fenêtre entre « dépiler » et « admettre ».
+        Il ne garantit pas que l'appel réseau ait commencé : un appel peut être
+        invoqué après une activation si son admission la précède.
         """
         logging.info("[Engine] ⚡ Order Routing Worker démarré.")
         while self.running:
@@ -1245,9 +1248,10 @@ class Engine:
                 payload = await self.order_queue.get()
 
                 # ── Barrière d'émission EXEC-01 ───────────────────────────────
-                # Le point de linéarisation est le démarrage de l'appel dans le
-                # thread, pas l'admission côté worker : le contrôle et l'appel
-                # execute_order() sont dans la même fonction exécutée en thread.
+                # Le point de non-retour est l'admission LOGIQUE dans le thread,
+                # pas l'invocation du connecteur (contrat B) : le contrôle et
+                # l'invocation sont dans la même fonction de thread, ce qui
+                # supprime la fenêtre asynchrone entre dépilement et admission.
                 emission_id = f"em_{uuid.uuid4().hex}"
                 payload['emission_id'] = emission_id
                 _t_start = time.perf_counter()
@@ -1260,15 +1264,16 @@ class Engine:
                     admitted, verdict = self.kill_switch.begin_emission_in_thread(
                         _emission_id, _payload.get('emission_epoch')
                     )
-                    # Horodatage immédiat de la sortie de la barrière : sert à
-                    # mesurer l'écart avec l'entrée réelle dans le connecteur.
+                    # Horodatage immédiat de la sortie de la barrière : point de
+                    # départ de la mesure du délai de dispatch (arrivée : juste
+                    # avant l'invocation du connecteur).
                     _gate_exit_at = time.perf_counter()
                     if not admitted:
                         return {'__emission_rejected__': verdict}
-                    # Trace de l'entrée physique dans le connecteur : l'écart avec
-                    # le franchissement logique de la barrière est mesuré, pas
-                    # supposé nul (contrat de sécurité EXEC-01).
-                    self.kill_switch.note_call_entered(_emission_id, _gate_exit_at)
+                    # Horodatage du DISPATCH, juste avant l'invocation du
+                    # connecteur. Ce n'est pas une mesure d'entrée dans
+                    # execute_order() : le contrat EXEC-01 est logique (option B).
+                    self.kill_switch.note_call_dispatch(_emission_id, _gate_exit_at)
                     try:
                         return self.connector.execute_order(
                             _payload['symbol'],
