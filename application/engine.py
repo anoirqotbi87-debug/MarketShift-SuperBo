@@ -170,6 +170,12 @@ class Engine:
         self._pending_reconciliation: list = []
         self._known_position_tickets: set = set()
 
+        # EXEC-01 : traçabilité des émissions bloquées par la barrière KillSwitch
+        # et des appels broker abandonnés après timeout (INDETERMINATE, non réémis).
+        self._neutralized_orders: list = []
+        self._abandoned_emissions: list = []
+        self._loop = None
+
         self._last_signal_candle: Dict[str, datetime.datetime] = {}
 
         logging.info(
@@ -333,6 +339,10 @@ class Engine:
     async def _async_run_loop(self):
         """Boucle principale de trading multi-symbole en mode asynchrone (100% parallèle)."""
         self.order_queue = asyncio.Queue()
+        # EXEC-01 : la file et l'event loop sont exposés au KillSwitch pour que
+        # l'activation neutralise immédiatement les ordres encore en attente.
+        self._loop = asyncio.get_running_loop()
+        self.kill_switch.register_neutralizer(self._schedule_neutralization)
         worker_task = asyncio.create_task(self._order_routing_worker())
         ts_task = asyncio.create_task(self._trailing_stop_worker())
         
@@ -345,6 +355,8 @@ class Engine:
 
         while self.running:
             if self.kill_switch.is_triggered:
+                # Filet de sécurité : neutralisation idempotente des ordres en attente.
+                await self._neutralize_pending_orders("KILL_SWITCH_ACTIVE")
                 await asyncio.sleep(1)
                 continue
 
@@ -804,6 +816,17 @@ class Engine:
             pre_snapshot_ok = False
             logging.warning(f"[Engine] ⚠️ Snapshot pré-ordre indisponible pour {symbol}: {_e}")
 
+        # EXEC-01 : aucun nouvel ordre ne doit entrer en file après activation du
+        # KillSwitch (l'admission finale reste de toute façon contrôlée par la
+        # barrière atomique du worker).
+        if self.kill_switch.is_triggered:
+            logging.critical(
+                f"[Engine] 🛑 Ordre {validated_signal.direction.name} {volume} sur {symbol} "
+                "NON mis en file : KillSwitch actif."
+            )
+            execution_metrics.record_pretrade_rejection("KILL_SWITCH_ACTIVE")
+            return
+
         payload = {
             'symbol': symbol,
             'direction': validated_signal.direction,
@@ -814,7 +837,10 @@ class Engine:
             'order_comment': order_comment,
             'pre_snapshot_ok': pre_snapshot_ok,
             'pre_existing_tickets': list(pre_tickets),
-            'metadata': validated_signal.metadata
+            'metadata': validated_signal.metadata,
+            # Génération d'émission : un payload produit avant une activation (ou
+            # avant un réarmement) est refusé par la barrière, même déjà dépilé.
+            'emission_epoch': self.kill_switch.emission_epoch,
         }
         await self.order_queue.put(payload)
         logging.info(f"[Engine] ⚡ Ordre {validated_signal.direction.name} {volume} sur {symbol} mis en queue de routage asynchrone.")
@@ -1201,15 +1227,38 @@ class Engine:
         """
         Worker asynchrone (Hummingbot-style).
         Dépile les ordres de la file et les exécute sans bloquer la boucle principale.
+
+        EXEC-01 : le worker ne peut plus commencer un appel broker sans avoir été
+        admis par la barrière atomique du KillSwitch. L'admission est acquise sous
+        le verrou partagé avec activate()/reset(), ce qui ferme la fenêtre de
+        concurrence entre « dépiler » et « engager l'appel ».
         """
         logging.info("[Engine] ⚡ Order Routing Worker démarré.")
         while self.running:
+            _emission_open = False
             try:
                 # Attend un ordre de la queue
                 payload = await self.order_queue.get()
+
+                # ── Barrière d'émission EXEC-01 ───────────────────────────────
+                admitted, verdict = self.kill_switch.try_begin_emission(
+                    payload.get('emission_epoch')
+                )
+                if not admitted:
+                    payload['neutralized_reason'] = verdict
+                    self._neutralized_orders.append(payload)
+                    execution_metrics.record_pretrade_rejection(verdict)
+                    logging.critical(
+                        f"[Engine] 🛑 Émission BLOQUÉE pour {payload.get('symbol')} "
+                        f"({verdict}) — aucun appel broker n'a été engagé."
+                    )
+                    self.order_queue.task_done()
+                    continue
+
                 execution_metrics.record_order_attempt()
                 _t_start = time.perf_counter()
-                
+                _emission_open = True
+
                 # Exécution (offload au ThreadPool pour ne pas bloquer ce worker si MT5 est lent) — timeout 4s strict
                 try:
                     result = await asyncio.wait_for(
@@ -1226,6 +1275,11 @@ class Engine:
                         timeout=4.0
                     )
                 except asyncio.TimeoutError:
+                    # Le timeout de la coroutine n'arrête PAS le thread déjà lancé :
+                    # l'appel reste INDETERMINATE (ni rejet, ni annulation).
+                    payload['emission_state'] = 'INDETERMINATE_IN_FLIGHT'
+                    payload['kill_switch_triggered'] = self.kill_switch.is_triggered
+                    self._abandoned_emissions.append(payload)
                     _latency_ms = (time.perf_counter() - _t_start) * 1000.0
                     execution_metrics.record_order_execution(_latency_ms, success=False)
                     import time as _t
@@ -1244,6 +1298,12 @@ class Engine:
                     payload['pre_existing_tickets'] = list(payload.get('pre_existing_tickets') or [])
                     payload['direction'] = payload.get('direction')
                     self._pending_reconciliation.append(payload)
+                    # Le thread broker peut continuer à tourner : l'émission est
+                    # clôturée côté worker mais reste suivie (INDETERMINATE) via
+                    # _abandoned_emissions / _pending_reconciliation. Aucune
+                    # réémission n'est déclenchée.
+                    self.kill_switch.end_emission()
+                    _emission_open = False
                     self.order_queue.task_done()
                     continue
 
@@ -1300,13 +1360,21 @@ class Engine:
                             logging.error(f"[Engine] Erreur dispatch trade opened: {alert_err}")
                 else:
                     execution_metrics.record_order_execution(_latency_ms, success=False)
-                        
+
+                # Clôture comptable de l'émission admise (l'appel broker est terminé).
+                self.kill_switch.end_emission()
+                _emission_open = False
                 self.order_queue.task_done()
                 
             except asyncio.CancelledError:
+                if _emission_open:
+                    self.kill_switch.end_emission()
                 break
             except Exception as e:
                 logging.error(f"[Engine] Erreur Order Routing Worker: {e}")
+                if _emission_open:
+                    self.kill_switch.end_emission()
+                    _emission_open = False
                 # Ne JAMAIS laisser la file bloquée : un order_queue.join() attendrait pour toujours.
                 # L'ordre est considéré échoué (aucun timeout réseau n'a eu lieu : exception synchrone).
                 try:
@@ -1424,5 +1492,56 @@ class Engine:
                     remaining.append(payload)
 
         self._pending_reconciliation = remaining
+
+    async def _neutralize_pending_orders(self, reason: str = "KILL_SWITCH_ACTIVATION"):
+        """Vide la file d'ordres en attente après activation du KillSwitch.
+
+        Objectif EXEC-01 : neutralisation explicite et traçable des ordres jamais
+        transmis. Aucun de ces ordres n'est réémis au réarmement.
+        """
+        neutralized = 0
+        while True:
+            try:
+                payload = self.order_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            except Exception:
+                break
+            payload['neutralized_reason'] = reason
+            self._neutralized_orders.append(payload)
+            logging.critical(
+                f"[Engine] 🛑 Ordre NEUTRALISÉ (jamais transmis) : "
+                f"{payload.get('symbol')} {payload.get('direction')} "
+                f"vol={payload.get('volume')} — motif={reason}"
+            )
+            try:
+                self.order_queue.task_done()
+            except Exception:
+                pass
+            neutralized += 1
+        if neutralized:
+            logging.critical(f"[Engine] 🛑 {neutralized} ordre(s) neutralisé(s) suite à {reason}.")
+        return neutralized
+
+    def _schedule_neutralization(self, reason: str = "KILL_SWITCH_ACTIVATION"):
+        """Callback (thread-safe) invoqué par KillSwitch.activate().
+
+        L'activation peut survenir depuis un thread API : on replanifie le vidage
+        de la file sur l'event loop du moteur.
+        """
+        loop = getattr(self, "_loop", None)
+        if loop is None or loop.is_closed():
+            logging.warning(
+                "[Engine] Neutralisation différée : event loop indisponible "
+                f"({reason}). Les ordres restants seront refusés par la barrière."
+            )
+            return
+        try:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self._neutralize_pending_orders(reason))
+            )
+        except RuntimeError as e:
+            logging.warning(f"[Engine] Neutralisation impossible ({reason}): {e}")
+
 
 
