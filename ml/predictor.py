@@ -415,21 +415,16 @@ class MLPredictor:
             if confidence >= confidence_threshold:
                 signal.metadata['ml_confidence'] = confidence
                 signal.metadata['ml_validated'] = True
+                signal.metadata['ml_engine_mode'] = res.engine_mode
                 logging.info(
                     f"[MLPredictor] ✅ Signal {signal_dir} sur {symbol} validé par ML "
-                    f"(haute confiance: {confidence:.1%} >= {confidence_threshold:.1%})"
-                )
-                return signal
-            elif confidence >= 0.52:
-                signal.metadata['ml_confidence'] = confidence
-                signal.metadata['ml_validated'] = False
-                logging.info(
-                    f"[MLPredictor] ⚖️ Signal {signal_dir} sur {symbol} autorisé. L'IA est d'accord mais confiance modérée ({confidence:.1%} < {confidence_threshold:.1%})."
+                    f"(haute confiance: {confidence:.1%} >= {confidence_threshold:.1%}, mode: {res.engine_mode})"
                 )
                 return signal
             else:
                 logging.warning(
-                    f"[MLPredictor] 🚫 Signal {signal_dir} sur {symbol} REJETÉ. L'IA est trop indécise ({confidence:.1%} < 52%)."
+                    f"[MLPredictor] 🚫 Signal {signal_dir} sur {symbol} REJETÉ. "
+                    f"Confiance insuffisante ({confidence:.1%} < {confidence_threshold:.1%})."
                 )
                 return None
         else:
@@ -443,33 +438,68 @@ class MLPredictor:
         """
         Prédit la direction du marché à partir des données OHLCV.
         """
-        if not ML_AVAILABLE or not self._trainer.is_trained:
+        if not ML_AVAILABLE or not getattr(self._trainer, 'is_trained', False) or df is None:
+            return 'WAIT', 0.0, {}
+
+        if not isinstance(df, pd.DataFrame) or df.empty or len(df) < 10:
             return 'WAIT', 0.0, {}
 
         try:
-            xgb_model = self._trainer.xgb_model
-            lstm_model = self._trainer.lstm_model
-            scaler  = self._trainer.scaler
+            xgb_model = getattr(self._trainer, 'xgb_model', None)
+            lstm_model = getattr(self._trainer, 'lstm_model', None)
+            scaler = getattr(self._trainer, 'scaler', None)
 
-            if xgb_model is None or lstm_model is None or scaler is None:
+            if xgb_model is None or scaler is None:
                 return 'WAIT', 0.0, {}
 
             processed_df = self._trainer._build_features(df)
-            if processed_df is None or len(processed_df) < 10:
+            if processed_df is None or not isinstance(processed_df, pd.DataFrame) or len(processed_df) < 10:
                 return 'WAIT', 0.0, {}
 
-            last_10 = processed_df[self._trainer.FEATURE_COLUMNS].values[-10:]
+            feat_cols = getattr(self._trainer, 'FEATURE_COLUMNS', None)
+            if not feat_cols or not all(c in processed_df.columns for c in feat_cols):
+                return 'WAIT', 0.0, {}
+
+            last_10 = processed_df[feat_cols].values[-10:]
+            # Rejet strict des valeurs non finies (NaN / Inf) dans les features (Contrat C1)
+            if np.isnan(last_10).any() or np.isinf(last_10).any():
+                logging.warning("[MLPredictor] Features contiennent des valeurs non finies (NaN/Inf) -> Rejet C1.")
+                return 'WAIT', 0.0, {}
+
             last_10_scaled = scaler.transform(last_10)
 
-            xgb_proba = xgb_model.predict_proba([last_10_scaled[-1]])[0]
-            xgb_buy_conf = float(xgb_proba[1])
-            xgb_sell_conf = float(xgb_proba[0])
+            # Validation stricte des probabilités XGBoost (Contrat C1)
+            xgb_proba_raw = xgb_model.predict_proba([last_10_scaled[-1]])[0]
+            xgb_buy_conf = float(xgb_proba_raw[1])
+            xgb_sell_conf = float(xgb_proba_raw[0])
+
+            if (
+                math.isnan(xgb_buy_conf)
+                or math.isnan(xgb_sell_conf)
+                or math.isinf(xgb_buy_conf)
+                or math.isinf(xgb_sell_conf)
+                or xgb_buy_conf < 0.0
+                or xgb_buy_conf > 1.0
+                or xgb_sell_conf < 0.0
+                or xgb_sell_conf > 1.0
+            ):
+                logging.warning(f"[MLPredictor] Probabilités XGBoost hors bornes [0, 1] ou non finies: {xgb_proba_raw}")
+                return 'WAIT', 0.0, {}
 
             if lstm_model is not None and TORCH_AVAILABLE and torch is not None:
                 seq_tensor = torch.tensor(np.array([last_10_scaled]), dtype=torch.float32)
                 lstm_model.eval()
                 with torch.no_grad():
-                    lstm_out = lstm_model(seq_tensor).item()
+                    lstm_out = float(lstm_model(seq_tensor).item())
+
+                if (
+                    math.isnan(lstm_out)
+                    or math.isinf(lstm_out)
+                    or lstm_out < 0.0
+                    or lstm_out > 1.0
+                ):
+                    logging.warning(f"[MLPredictor] Sortie LSTM hors bornes [0, 1]: {lstm_out}")
+                    return 'WAIT', 0.0, {}
 
                 lstm_buy_conf = lstm_out
                 lstm_sell_conf = 1.0 - lstm_out
@@ -480,7 +510,12 @@ class MLPredictor:
                 buy_confidence = xgb_buy_conf
                 sell_confidence = xgb_sell_conf
 
-            feature_importances = self._trainer.get_feature_importances()
+            feature_importances: Dict[str, float] = {}
+            if hasattr(self._trainer, 'get_feature_importances'):
+                try:
+                    feature_importances = self._trainer.get_feature_importances()
+                except Exception:
+                    feature_importances = {}
 
             if buy_confidence >= sell_confidence:
                 return 'BUY', buy_confidence, feature_importances
@@ -494,12 +529,27 @@ class MLPredictor:
     def filter_signal(self, signal: 'Signal', df: 'pd.DataFrame') -> Optional['Signal']:
         """
         Filtre un signal technique via le modèle ML (synchrone historique).
+
+        Garanties Palier C1 :
+        - Rejet immédiat si signal is None ou df is None / incomplet.
+        - Fail-Closed absolu si le modèle n'est pas entraîné.
+        - Rejet strict si confidence < seuil effectif (aucun bypass [0.52, 0.58[).
+        - Renseigne 'ml_engine_mode' ('XGBOOST_ONLY' ou 'ENSEMBLE_XGB_LSTM').
         """
-        if not self._trainer.is_trained:
+        if signal is None:
+            return None
+
+        if not ML_AVAILABLE or not getattr(self._trainer, 'is_trained', False):
             logging.debug(
-                "[MLPredictor] Modèle non entraîné, signal technique passé sans filtre ML."
+                "[MLPredictor] Modèle non entraîné ou ML indisponible -> Rejet fail-closed (C1)."
             )
-            return signal
+            return None
+
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty or len(df) < 10:
+            logging.warning(
+                f"[MLPredictor] Données OHLCV insuffisantes pour {getattr(signal, 'symbol', 'UNKNOWN')} -> Rejet fail-closed."
+            )
+            return None
 
         confidence_threshold = self._effective_threshold(signal.symbol)
 
@@ -514,23 +564,23 @@ class MLPredictor:
 
         if direction == signal_dir:
             if confidence >= confidence_threshold:
+                engine_mode = (
+                    "ENSEMBLE_XGB_LSTM"
+                    if (getattr(self._trainer, 'lstm_model', None) is not None and TORCH_AVAILABLE and torch is not None)
+                    else "XGBOOST_ONLY"
+                )
                 signal.metadata['ml_confidence'] = confidence
                 signal.metadata['ml_validated'] = True
+                signal.metadata['ml_engine_mode'] = engine_mode
                 logging.info(
                     f"[MLPredictor] ✅ Signal {signal_dir} sur {signal.symbol} validé par ML "
-                    f"(haute confiance: {confidence:.1%} >= {confidence_threshold:.1%})"
-                )
-                return signal
-            elif confidence >= 0.52:
-                signal.metadata['ml_confidence'] = confidence
-                signal.metadata['ml_validated'] = False
-                logging.info(
-                    f"[MLPredictor] ⚖️ Signal {signal_dir} autorisé. L'IA est d'accord mais confiance modérée ({confidence:.1%} < {confidence_threshold:.1%})."
+                    f"(haute confiance: {confidence:.1%} >= {confidence_threshold:.1%}, mode: {engine_mode})"
                 )
                 return signal
             else:
                 logging.warning(
-                    f"[MLPredictor] 🚫 Signal {signal_dir} sur {signal.symbol} REJETÉ. L'IA est trop indécise ({confidence:.1%} < 52%)."
+                    f"[MLPredictor] 🚫 Signal {signal_dir} sur {signal.symbol} REJETÉ. "
+                    f"Confiance insuffisante ({confidence:.1%} < {confidence_threshold:.1%})."
                 )
                 return None
         else:
