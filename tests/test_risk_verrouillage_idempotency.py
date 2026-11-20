@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 
 from core.interfaces import OrderType, PositionInfo, AccountInfo
 from infrastructure.broker_router import BrokerRouter
+from infrastructure.config import Config
 from api.server import (
     app,
     IdempotencyBlockedError,
@@ -32,22 +33,22 @@ from api.server import (
 
 
 @pytest.fixture
-def client():
-    # Herméticité : purge de la table idempotency_records entre chaque run de test.
-    # Sans cela, une clé persistée au run précédent (même BDD SQLite) bloquerait le
-    # verrouillage strict du run suivant (statut CONFIRMED persistant).
-    try:
-        from infrastructure.database import SessionLocal
-        from infrastructure.models import IdempotencyRecord
-        db = SessionLocal()
-        try:
-            db.query(IdempotencyRecord).delete()
-            db.commit()
-        finally:
-            db.close()
-    except Exception:
-        pass
-    yield TestClient(app)
+def client(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from infrastructure.database import Base
+    db_file = tmp_path / "test_idem.db"
+    tmp_engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=tmp_engine)
+    TmpSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=tmp_engine)
+
+    idempotency_store._records.clear()
+
+    with patch("infrastructure.database.SessionLocal", TmpSessionLocal), \
+         patch("api.server.SessionLocal", TmpSessionLocal, create=True), \
+         patch.object(Config, "API_SECRET_KEY", "verrou_key"):
+        yield TestClient(app)
+    tmp_engine.dispose()
 
 
 def make_symbol_info(**overrides):

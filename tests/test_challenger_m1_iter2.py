@@ -274,11 +274,12 @@ def test_failsafe_mode_credentials() -> Dict[str, Any]:
     - All notify_* calls return False in < 0.1 ms (100 iterations)
     - 0 network calls initiated
     """
-    cases = [
-        ("empty_str", TelegramNotifier("", "")),
-        ("whitespace", TelegramNotifier("   \t  ", "  \n  ")),
-        ("none_vals", TelegramNotifier(None, None, auto_start=True))
-    ]
+    with patch.object(Config, "TELEGRAM_BOT_TOKEN", ""), patch.object(Config, "TELEGRAM_CHAT_ID", ""):
+        cases = [
+            ("empty_str", TelegramNotifier("", "")),
+            ("whitespace", TelegramNotifier("   \t  ", "  \n  ")),
+            ("none_vals", TelegramNotifier(None, None, auto_start=True))
+        ]
 
     results: Dict[str, Any] = {}
     all_passed = True

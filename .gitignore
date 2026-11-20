@@ -7,15 +7,20 @@ __pycache__/
 
 # Variables d'environnement (NE JAMAIS COMMITER)
 .env
+.env*
 .env.local
 .env.*.local
 
 # Bases de données SQLite & transactions
 *.db
+*.db*
 *.db-wal
 *.db-shm
 *.sqlite
 *.sqlite3
+
+# Hooks & scripts locaux
+hooks/
 
 # Données & Dumps historiques
 *.csv
