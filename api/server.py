@@ -17,6 +17,7 @@ import json
 import logging
 import math
 import datetime
+import secrets
 import threading
 import time
 from collections import deque
@@ -438,27 +439,27 @@ async def startup_event():
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 async def verify_api_key(request: Request, api_key_header: str = Security(api_key_header)):
-    # Clé de secours institutionnelle par défaut du dashboard SuperBot
-    fallback_key = "1f4e4a57fbef3922fdffa64d8849cf24ad47215372f14ffa4cba8c9a0992f4e5"
     configured_key = Config.API_SECRET_KEY
 
-    # Si aucune clé secrète n'est configurée dans l'environnement
+    # Fail-closed universel : rejet systématique si aucune clé n'est configurée sur le serveur
     if not configured_key:
-        if api_key_header and api_key_header == fallback_key:
-            return api_key_header
-        if Config.ENVIRONMENT.lower() in ("development", "dev", "test"):
-            return api_key_header or ""
         raise HTTPException(
-            status_code=500, detail="Configuration serveur invalide : API_SECRET_KEY non configurée"
+            status_code=403, detail="Accès refusé : Authentification API non configurée (Fail-Closed)"
         )
 
-    # Si une clé secrète est configurée (mode sécurisé)
-    if api_key_header and (api_key_header == configured_key or api_key_header == fallback_key):
-        return api_key_header
+    # Rejet sans fuite d'information si l'en-tête est manquant ou vide
+    if not api_key_header:
+        raise HTTPException(
+            status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
+        )
 
-    raise HTTPException(
-        status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
-    )
+    # Validation en temps constant pour immuniser contre les attaques temporelles
+    if not secrets.compare_digest(api_key_header, configured_key):
+        raise HTTPException(
+            status_code=403, detail="Clé d'API manquante ou invalide (X-API-Key)"
+        )
+
+    return api_key_header
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1890,16 +1891,16 @@ class SettingsPayload(BaseModel):
 
 class ApplySettingsPayload(BaseModel):
     slMult: float = Field(..., ge=0.5, le=5.0, description="Multiplicateur SL ATR borné entre 0.5 et 5.0")
-    confThreshold: float = Field(..., description="Seuil de confiance borné entre 0.50 et 0.90 (ou 50 et 90)")
+    confThreshold: float = Field(..., description="Seuil de confiance borné entre 0.58 et 0.90 (ou 58 et 90)")
     symbol: Optional[str] = None
 
     @field_validator('confThreshold')
     @classmethod
     def validate_confidence_threshold(cls, v: float) -> float:
         normalized = v / 100.0 if v > 1.0 else v
-        if not (0.50 <= normalized <= 0.90):
+        if not (0.58 <= normalized <= 0.90):
             raise ValueError(
-                f"Le seuil de confiance ML doit être compris entre 0.50 et 0.90 (ou 50% et 90%), reçu: {v}"
+                f"Le seuil de confiance ML doit être compris entre 0.58 et 0.90 (ou 58% et 90%), reçu: {v}"
             )
         return v
 
@@ -1918,10 +1919,10 @@ def apply_optimal_settings(
             status_code=422,
             detail=f"slMult doit être compris entre 0.5 et 5.0, reçu : {payload.slMult}"
         )
-    if not (0.50 <= conf_val <= 0.90):
+    if not (0.58 <= conf_val <= 0.90):
         raise HTTPException(
             status_code=422,
-            detail=f"confThreshold doit être compris entre 0.50 et 0.90, reçu : {conf_val}"
+            detail=f"confThreshold doit être compris entre 0.58 et 0.90, reçu : {conf_val}"
         )
     
     sl_key = f"ATR_SL_MULTIPLIER_{payload.symbol}" if payload.symbol else "ATR_SL_MULTIPLIER"

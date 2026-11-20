@@ -34,29 +34,57 @@ class MLPredictor:
     def __init__(self, trainer: 'MLTrainer'):
         from infrastructure.config import Config
         self._trainer = trainer
-        self._confidence_threshold = float(Config.ML_CONFIDENCE_THRESHOLD)
+        import math
+        try:
+            init_val = float(Config.ML_CONFIDENCE_THRESHOLD)
+            if math.isnan(init_val) or math.isinf(init_val):
+                init_val = 0.58
+            elif init_val > 1.0:
+                init_val = init_val / 100.0
+        except (TypeError, ValueError):
+            init_val = 0.58
+        self._confidence_threshold = min(0.95, max(0.58, init_val))
         logging.info(
             f"[MLPredictor] Initialisé (seuil de confidence global: {self._confidence_threshold:.0%})"
         )
 
     def set_confidence_threshold(self, threshold: float) -> None:
-        """Met à jour le seuil de confidence (0.5 - 1.0) global en runtime."""
-        self._confidence_threshold = max(0.5, min(1.0, threshold))
+        """Met à jour le seuil de confidence (borné entre 0.58 et 0.95) global en runtime."""
+        import math
+        try:
+            val = float(threshold)
+        except (TypeError, ValueError):
+            val = 0.58
+        if math.isnan(val) or math.isinf(val):
+            val = 0.58
+
+        self._confidence_threshold = min(0.95, max(0.58, val))
         logging.info(f"[MLPredictor] Seuil global mis à jour: {self._confidence_threshold:.0%}")
 
     def _effective_threshold(self, symbol: str) -> float:
         """
-        Seuil effectif pour un symbole: override env par symbole (le cas échéant),
-        sinon seuil global (Config à l'init ou valeur runtime via set_confidence_threshold).
+        Seuil effectif pour un symbole :
+        Formule inviolable : min(0.95, max(0.58, T_global, T_symbole(s)))
         """
         import os
+        import math
+
+        sym_val: Optional[float] = None
         env_val = os.getenv(f"ML_CONFIDENCE_THRESHOLD_{symbol}")
         if env_val is not None:
             try:
-                return float(env_val)
+                parsed = float(env_val)
+                if not (math.isnan(parsed) or math.isinf(parsed)):
+                    sym_val = parsed
+                else:
+                    logging.warning(f"[MLPredictor] ML_CONFIDENCE_THRESHOLD_{symbol} non fini: {env_val!r}")
             except ValueError:
                 logging.warning(f"[MLPredictor] ML_CONFIDENCE_THRESHOLD_{symbol} invalide: {env_val!r}")
-        return self._confidence_threshold
+
+        base_val = max(0.58, self._confidence_threshold)
+        if sym_val is not None:
+            return min(0.95, max(base_val, sym_val))
+        return min(0.95, base_val)
 
     def predict(self, df: 'pd.DataFrame') -> Tuple[str, float, dict]:
         """

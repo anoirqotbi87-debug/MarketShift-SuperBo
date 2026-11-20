@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -37,11 +37,29 @@ class AppConfig(BaseSettings):
 
 
     # ── ML ────────────────────────────────────────────────────────────────────
-    # Seuil calibré à 58% (cohérent avec l'accuracy modèle ~62.7%).
-    # Overridable par symbole via ML_CONFIDENCE_THRESHOLD_EURUSD=0.55 dans .env
-    ML_CONFIDENCE_THRESHOLD: float = Field(0.58, ge=0.0, le=1.0)
+    # Seuil calibré à 58% (cohérent avec l'accuracy modèle ~62.7%), borné dans [0.58, 0.95].
+    # Overridable par symbole via ML_CONFIDENCE_THRESHOLD_EURUSD=0.65 dans .env
+    ML_CONFIDENCE_THRESHOLD: float = Field(0.58, ge=0.58, le=0.95, description="Seuil minimal de confiance ML borné entre 0.58 et 0.95")
     ML_MIN_ACCURACY: float = Field(0.55, ge=0.0, le=1.0, description="Accuracy minimale requise pour valider un ré-entraînement ML")
     ML_MIN_SAMPLES: int = Field(10000, ge=100, description="Nombre minimal de barres requises pour valider un ré-entraînement ML")
+
+    @field_validator("ML_CONFIDENCE_THRESHOLD", mode="before")
+    @classmethod
+    def validate_ml_confidence_threshold(cls, v: Any) -> float:
+        import math
+        try:
+            val = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"ML_CONFIDENCE_THRESHOLD doit être un nombre, reçu: {v}")
+        if math.isnan(val) or math.isinf(val):
+            raise ValueError("ML_CONFIDENCE_THRESHOLD ne peut pas être NaN ou Infini")
+        if val > 1.0:
+            val = val / 100.0
+        if not (0.58 <= val <= 0.95):
+            raise ValueError(
+                f"ML_CONFIDENCE_THRESHOLD doit être compris entre 0.58 et 0.95 (ou 58% et 95%), reçu: {val}"
+            )
+        return val
 
     # ── Credentials ───────────────────────────────────────────────────────────
     XM_LOGIN: str = Field("")
@@ -172,10 +190,17 @@ class AppConfig(BaseSettings):
         
     def get_symbol_ml_confidence(self, symbol: str) -> float:
         import os
+        import math
         val = os.getenv(f"ML_CONFIDENCE_THRESHOLD_{symbol}")
         if val is not None:
-            try: return float(val)
-            except ValueError: pass
+            try:
+                parsed = float(val)
+                if not (math.isnan(parsed) or math.isinf(parsed)):
+                    if parsed > 1.0:
+                        parsed /= 100.0
+                    return min(0.95, max(0.58, self.ML_CONFIDENCE_THRESHOLD, parsed))
+            except ValueError:
+                pass
         return self.ML_CONFIDENCE_THRESHOLD
 
     @property
