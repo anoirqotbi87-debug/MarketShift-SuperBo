@@ -562,15 +562,10 @@ class Engine:
             f"Source: {signal.source}"
         )
 
-        # 4. Filtre ML — timeout 20s (le modèle LSTM peut être lent sur CPU)
-        try:
-            validated_signal = await asyncio.wait_for(
-                asyncio.to_thread(self.ml_predictor.filter_signal, signal, df),
-                timeout=20.0
-            )
-        except asyncio.TimeoutError:
-            logging.warning(f"[Engine] ⏱️ Timeout ML (20s) sur {symbol} — signal ignoré ce cycle.")
-            return
+        # 4. Filtre ML — Garde-fous Palier C2 (Pool borné & timeout 500ms)
+        validated_signal = await self.ml_predictor.filter_signal_async(
+            signal, df, timeout_seconds=0.500
+        )
         if not validated_signal:
             logging.info(f"[Engine] 🤖 Signal {signal.direction.name} {symbol} rejeté par ML.")
             return
