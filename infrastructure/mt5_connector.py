@@ -15,8 +15,8 @@ from core.interfaces import IBrokerConnector, AccountInfo, PositionInfo, OrderTy
 
 class MT5Connector(IBrokerConnector):
     ALIAS_MAP = {
-        "XAUUSD": ["GOLD", "XAUUSD#", "GOLDmicro", "GOLD#", "XAUUSD"],
-        "GOLD": ["GOLD", "XAUUSD", "GOLDmicro", "GOLD#"],
+        "XAUUSD": ["XAUUSD", "GOLD", "XAUUSD#", "GOLDmicro", "GOLD#"],
+        "GOLD": ["XAUUSD", "GOLD", "GOLDmicro", "GOLD#", "XAUUSD#"],
         "SILVER": ["SILVER", "XAGUSD", "SILVERmicro", "SILVER#"],
         "XAGUSD": ["SILVER", "XAGUSD", "SILVERmicro", "SILVER#"],
         "USOIL": ["OIL", "OILCash", "USOILCash", "USOIL#", "USOIL", "WTI"],
@@ -38,43 +38,88 @@ class MT5Connector(IBrokerConnector):
         self._resolved_symbols: Dict[str, Optional[str]] = {}
 
     def resolve_symbol(self, symbol: str) -> Optional[str]:
-        """Résout dynamiquement les alias du broker (ex: XM nomme XAUUSD -> GOLD, GER40 -> GER40Cash)."""
+        """Résout dynamiquement les alias du broker (ex: Exness nomme EURUSD -> EURUSDm/c, XM nomme XAUUSD -> GOLD)."""
         if not self.connected or mt5 is None:
             return symbol
 
-        sym_clean = symbol.strip().upper()
-        if sym_clean in self._resolved_symbols:
-            return self._resolved_symbols[sym_clean]
+        raw_sym = symbol.strip()
+        if not raw_sym:
+            return None
+
+        # 1. Vérification du cache avec la casse exacte
+        if raw_sym in self._resolved_symbols:
+            return self._resolved_symbols[raw_sym]
 
         with self._lock:
             mt5.initialize()
-            # 1. Tester le symbole brut
-            info = mt5.symbol_info(sym_clean)
-            if info is not None:
-                mt5.symbol_select(sym_clean, True)
-                self._resolved_symbols[sym_clean] = sym_clean
-                return sym_clean
 
-            # 2. Tester les alias connus
-            candidates = list(self.ALIAS_MAP.get(sym_clean, []))
-            for base in [sym_clean, sym_clean.replace("#", "")]:
-                for suffix in ["#", "micro", "Cash", "m", ".raw"]:
-                    cand = f"{base}{suffix}"
-                    if cand not in candidates:
+            # 2. Priorité absolue : tester le symbole exact tel que fourni (préserve la casse broker, ex: EURUSDm, XAUUSDc)
+            info = mt5.symbol_info(raw_sym)
+            if info is not None:
+                mt5.symbol_select(raw_sym, True)
+                self._resolved_symbols[raw_sym] = raw_sym
+                return raw_sym
+
+            # 3. Tester en majuscules si différent du symbole brut
+            sym_upper = raw_sym.upper()
+            if sym_upper != raw_sym:
+                if sym_upper in self._resolved_symbols:
+                    res = self._resolved_symbols[sym_upper]
+                    self._resolved_symbols[raw_sym] = res
+                    return res
+                u_info = mt5.symbol_info(sym_upper)
+                if u_info is not None:
+                    mt5.symbol_select(sym_upper, True)
+                    self._resolved_symbols[raw_sym] = sym_upper
+                    self._resolved_symbols[sym_upper] = sym_upper
+                    return sym_upper
+
+            # 4. Bases et équivalences bidirectionnelles (notamment GOLD <-> XAUUSD)
+            bases: List[str] = [sym_upper]
+            stripped_base = sym_upper
+            for sfx in ["#", "MICRO", "CASH", ".RAW"]:
+                if stripped_base.endswith(sfx):
+                    stripped_base = stripped_base[:-len(sfx)]
+            if len(stripped_base) in (7, 5) and (stripped_base.endswith("M") or stripped_base.endswith("C")):
+                stripped_base = stripped_base[:-1]
+
+            if stripped_base not in bases:
+                bases.append(stripped_base)
+
+            # Équivalences bidirectionnelles et alias connus
+            for b in list(bases):
+                for alias in self.ALIAS_MAP.get(b, []):
+                    alias_up = alias.upper()
+                    if alias_up not in bases:
+                        bases.append(alias_up)
+                if b == "GOLD" and "XAUUSD" not in bases:
+                    bases.append("XAUUSD")
+                elif b == "XAUUSD" and "GOLD" not in bases:
+                    bases.append("GOLD")
+
+            # 5. Tester les suffixes broker (Exness 'm', 'c', XM '#', etc.)
+            suffixes = ["m", "c", "", "#", "micro", "Cash", ".raw"]
+            candidates: List[str] = []
+            for b in bases:
+                for sfx in suffixes:
+                    cand = f"{b}{sfx}" if sfx != "" else b
+                    if cand not in candidates and cand != raw_sym and cand != sym_upper:
                         candidates.append(cand)
 
             for cand in candidates:
                 c_info = mt5.symbol_info(cand)
                 if c_info is not None:
                     mt5.symbol_select(cand, True)
-                    logging.info(f"[MT5Connector] 🎯 Symbole {sym_clean} résolu en alias broker : '{cand}'")
-                    self._resolved_symbols[sym_clean] = cand
+                    logging.info(f"[MT5Connector] 🎯 Symbole '{raw_sym}' résolu en alias broker : '{cand}'")
+                    self._resolved_symbols[raw_sym] = cand
+                    self._resolved_symbols[sym_upper] = cand
                     return cand
 
-        # 3. Non disponible sur ce broker
-        self._resolved_symbols[sym_clean] = None
-        logging.warning(f"[MT5Connector] ⚠️ Symbole '{sym_clean}' non disponible dans le catalogue de ce broker ({self.server}). Scan ignoré.")
-        return None
+            # 6. Non disponible sur ce broker
+            self._resolved_symbols[raw_sym] = None
+            self._resolved_symbols[sym_upper] = None
+            logging.warning(f"[MT5Connector] ⚠️ Symbole '{raw_sym}' non disponible dans le catalogue de ce broker ({self.server}). Scan ignoré.")
+            return None
 
     def connect(self) -> bool:
         if mt5 is None:
