@@ -29,13 +29,31 @@ class MT5Connector(IBrokerConnector):
         "SOLUSD": ["SOLUSD", "SOLUSD#", "SOLANA", "SOLUSDmicro"],
     }
 
-    def __init__(self, login: int, password: str, server: str):
+    def __init__(self, login: int, password: str, server: str, read_only: bool = False, enforce_demo_only: bool = False):
         self.login = login
         self.password = password
         self.server = server
         self.connected = False
         self._lock = threading.Lock()
         self._resolved_symbols: Dict[str, Optional[str]] = {}
+        self._read_only: bool = bool(read_only)
+        self.enforce_demo_only: bool = bool(enforce_demo_only)
+        self._has_indeterminate_primary_order: bool = False
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    @read_only.setter
+    def read_only(self, val: bool) -> None:
+        if self._read_only and not val:
+            raise PermissionError("Le mode passif strict (read_only) est un latch unidirectionnel et ne peut être désactivé.")
+        self._read_only = bool(val)
+
+    def is_demo_account(self) -> bool:
+        """Vérifie si le compte connecté est formellement certifié démo."""
+        acc = self.get_account_info()
+        return bool(acc and acc.is_certified_demo)
 
     def resolve_symbol(self, symbol: str) -> Optional[str]:
         """Résout dynamiquement les alias du broker (ex: Exness nomme EURUSD -> EURUSDm/c, XM nomme XAUUSD -> GOLD)."""
@@ -141,6 +159,10 @@ class MT5Connector(IBrokerConnector):
             # Calling mt5.login() again immediately after hangs the terminal.
                     
         self.connected = True
+        if self.enforce_demo_only:
+            if not self.is_demo_account():
+                self.disconnect()
+                raise PermissionError("Connexion rompue : compte non certifié démo interdit (enforce_demo_only=True)")
         logging.info(f"Connecté à MT5 avec succès (Serveur: {self.server})")
         return True
 
@@ -158,6 +180,10 @@ class MT5Connector(IBrokerConnector):
             mt5.initialize()
             info = mt5.account_info()
         if info is None: return None
+
+        trade_mode = getattr(info, "trade_mode", -1)
+        if trade_mode is None:
+            trade_mode = -1
         
         return AccountInfo(
             login=info.login,
@@ -166,7 +192,8 @@ class MT5Connector(IBrokerConnector):
             free_margin=info.margin_free,
             margin_level=info.margin_level,
             currency=info.currency,
-            server=info.server
+            server=info.server,
+            trade_mode=trade_mode
         )
 
     def get_symbol_info(self, symbol: str) -> Optional[Any]:
@@ -215,6 +242,8 @@ class MT5Connector(IBrokerConnector):
         ]
 
     def execute_order(self, symbol: str, order_type: OrderType, volume: float, sl: float = 0.0, tp: float = 0.0, magic: int = 0, comment: str = "") -> Optional[Dict[str, Any]]:
+        if getattr(self, "read_only", False):
+            raise PermissionError("Mode passif strict : toute émission/modification d'ordre est interdite")
         if not self.connected: return None
         real_sym = self.resolve_symbol(symbol)
         if not real_sym:
@@ -248,6 +277,42 @@ class MT5Connector(IBrokerConnector):
                 logging.error(f"[MT5Connector] Impossible d'obtenir le tick pour {symbol}")
                 return None
             price = tick.ask if order_type == OrderType.BUY else tick.bid
+
+            point = getattr(symbol_info, "point", 0.00001) or 0.00001
+            stops_level = getattr(symbol_info, "trade_stops_level", 0) or 0
+            min_dist = stops_level * point
+
+            # Validation géométrique et stops_level (Palier A - Réserve 4)
+            if order_type == OrderType.BUY:
+                if sl and sl > 0.0:
+                    if sl >= price:
+                        logging.error(f"[MT5Connector] Violation géométrique: SL ({sl}) >= Ask ({price}) pour BUY")
+                        return None
+                    if min_dist > 0 and (price - sl) < (min_dist - 1e-9):
+                        logging.error(f"[MT5Connector] Violation stops_level: distance SL ({price - sl:.5f}) < seuil ({min_dist:.5f})")
+                        return None
+                if tp and tp > 0.0:
+                    if tp <= price:
+                        logging.error(f"[MT5Connector] Violation géométrique: TP ({tp}) <= Ask ({price}) pour BUY")
+                        return None
+                    if min_dist > 0 and (tp - price) < (min_dist - 1e-9):
+                        logging.error(f"[MT5Connector] Violation stops_level: distance TP ({tp - price:.5f}) < seuil ({min_dist:.5f})")
+                        return None
+            else:
+                if sl and sl > 0.0:
+                    if sl <= price:
+                        logging.error(f"[MT5Connector] Violation géométrique: SL ({sl}) <= Bid ({price}) pour SELL")
+                        return None
+                    if min_dist > 0 and (sl - price) < (min_dist - 1e-9):
+                        logging.error(f"[MT5Connector] Violation stops_level: distance SL ({sl - price:.5f}) < seuil ({min_dist:.5f})")
+                        return None
+                if tp and tp > 0.0:
+                    if tp >= price:
+                        logging.error(f"[MT5Connector] Violation géométrique: TP ({tp}) >= Bid ({price}) pour SELL")
+                        return None
+                    if min_dist > 0 and (price - tp) < (min_dist - 1e-9):
+                        logging.error(f"[MT5Connector] Violation stops_level: distance TP ({price - tp:.5f}) < seuil ({min_dist:.5f})")
+                        return None
             
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -255,14 +320,14 @@ class MT5Connector(IBrokerConnector):
                 "volume": float(volume),
                 "type": action_type,
                 "price": price,
-            "sl": float(sl),
-            "tp": float(tp),
-            "deviation": 20,
-            "magic": magic,
-            "comment": comment or "MarketShift SuperBot",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
+                "sl": float(sl),
+                "tp": float(tp),
+                "deviation": 20,
+                "magic": magic,
+                "comment": comment or "MarketShift SuperBot",
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
         
         with self._lock:
             mt5.initialize()
@@ -279,9 +344,11 @@ class MT5Connector(IBrokerConnector):
             logging.error(f"Erreur envoi ordre: {result.retcode} - {result.comment}")
             return None
             
-        return {"ticket": result.order, "price": result.price, "volume": result.volume}
+        return {"ticket": result.order, "price": result.price, "volume": result.volume, "status": "CONFIRMED"}
 
     def close_position(self, ticket: int) -> bool:
+        if getattr(self, "read_only", False):
+            raise PermissionError("Mode passif strict : toute émission/modification d'ordre est interdite")
         if not self.connected: return False
         
         with self._lock:
@@ -328,6 +395,8 @@ class MT5Connector(IBrokerConnector):
 
     def modify_position(self, ticket: int, symbol: str, new_sl: float) -> bool:
         """Modifie le Stop Loss d'une position existante avec vérification du Stops Level."""
+        if getattr(self, "read_only", False):
+            raise PermissionError("Mode passif strict : toute émission/modification d'ordre est interdite")
         if not self.connected: return False
         real_sym = self.resolve_symbol(symbol) or symbol
         symbol = real_sym

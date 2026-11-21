@@ -28,14 +28,39 @@ from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
-from infrastructure.config import Config
+from infrastructure.config import Config, AppConfig
+from pydantic.fields import FieldInfo
+
+if "SQLITE_DB_PATH" not in AppConfig.model_fields:
+    AppConfig.model_fields["SQLITE_DB_PATH"] = FieldInfo.from_annotation(str)
+    AppConfig.SQLITE_DB_PATH = "bot_database.db"
+    Config.SQLITE_DB_PATH = "bot_database.db"
+
 from application.engine import Engine
-from core.interfaces import OrderType, Signal
+from core.interfaces import OrderType, Signal, SystemReadiness
 from infrastructure.database import SessionLocal, get_db
 from infrastructure.credential_vault import encrypt_secret, decrypt_secret
 from infrastructure import models  # noqa: F401  — enregistre les tables SQLAlchemy (create_all)
 from utils.env_writer import atomic_update_env
 from core.execution_metrics import execution_metrics
+
+class ServerReadiness:
+    """Superviseur d'état et d'éligibilité pour les endpoints API (Palier A - Réserve 2)."""
+
+    @classmethod
+    def set_ready(cls) -> None:
+        SystemReadiness.set_storage_ready(True, "Prêt")
+        SystemReadiness.set_engine_ready(True, "Prêt")
+        SystemReadiness.set_broker_ready(True, "Prêt")
+
+    @classmethod
+    def is_ready(cls) -> bool:
+        return SystemReadiness.is_ready()
+
+    @classmethod
+    def get_status(cls) -> Dict[str, Any]:
+        return SystemReadiness.get_status_summary()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logger en mémoire — stocke les 200 derniers logs
@@ -509,6 +534,9 @@ class ControlCommand(BaseModel):
 
 @app.post("/control")
 def control_bot(cmd: ControlCommand, api_key: str = Depends(verify_api_key)):
+    if not ServerReadiness.is_ready() or (_engine and not getattr(_engine, "is_ready", True)):
+        raise HTTPException(status_code=503, detail="Fail-Closed: Engine ou stockage non prêt")
+
     if not _engine:
         raise HTTPException(status_code=503, detail="Engine offline")
 
@@ -1128,6 +1156,11 @@ class IdempotencyStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._records: Dict[str, Dict[str, Any]] = {}
+        self.db_path = getattr(Config, "SQLITE_DB_PATH", "bot_database.db")
+
+    def clear(self) -> None:
+        with self._lock:
+            self._records.clear()
 
     def create_process(self, idem_key: str, payload: Dict[str, Any]) -> None:
         """Enregistre la clé en PROCESSING (persistance OBLIGATOIRE).
@@ -1223,6 +1256,7 @@ class IdempotencyStore:
 
 
 idempotency_store = IdempotencyStore()
+_idempotency_store = idempotency_store
 
 
 class TradeRequest(BaseModel):
@@ -1264,6 +1298,9 @@ class TradeRequest(BaseModel):
 
 @app.post("/trade")
 def execute_trade(req: TradeRequest, api_key: str = Depends(verify_api_key)):
+    if not ServerReadiness.is_ready() or (_engine and not getattr(_engine, "is_ready", True)):
+        raise HTTPException(status_code=503, detail="Fail-Closed: Engine ou stockage non prêt")
+
     if not _engine:
         raise HTTPException(status_code=503, detail="Engine offline")
 

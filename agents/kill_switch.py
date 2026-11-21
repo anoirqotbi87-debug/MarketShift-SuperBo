@@ -1,5 +1,6 @@
 import logging
 import threading
+import time
 from typing import Any, Optional
 from infrastructure.mt5_connector import MT5Connector
 
@@ -11,12 +12,23 @@ except ImportError:
 
 
 class KillSwitch:
-    def __init__(self, connector: Any, notifier: Optional[Any] = None):
+    def __init__(self, connector: Any, notifier: Optional[Any] = None, passive_mode: bool = False):
         self.connector = connector
         self.notifier = notifier if notifier is not None else telegram_notifier
         self.is_triggered: bool = False
         self.activated_at: float = 0.0
         self._lock: threading.Lock = threading.Lock()
+        self._passive_mode: bool = bool(passive_mode)
+
+    @property
+    def passive_mode(self) -> bool:
+        return self._passive_mode
+
+    @passive_mode.setter
+    def passive_mode(self, val: bool) -> None:
+        if self._passive_mode and not val:
+            raise PermissionError("Le mode passif (passive_mode) ne peut être désactivé.")
+        self._passive_mode = bool(val)
 
     def activate(self, reason: str):
         """Active l'arrêt d'urgence et ferme toutes les positions (Article 12 RTS 6)"""
@@ -24,10 +36,14 @@ class KillSwitch:
             if self.is_triggered:
                 return
 
-            import time
             self.is_triggered = True
             self.activated_at = time.time()
             logging.critical(f"⚠️ KILL SWITCH ACTIVÉ ⚠️ Raison: {reason}")
+
+            # Confinement passif strict : zéro clôture broker (Palier A - Réserve 5)
+            if self._passive_mode or getattr(self.connector, "read_only", False):
+                logging.info(f"KillSwitch: mode passif/read_only actif, aucune clôture déclenchée pour: {reason}")
+                return
 
             pos_count = 0
             try:

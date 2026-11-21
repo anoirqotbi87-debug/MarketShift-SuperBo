@@ -1,9 +1,57 @@
 import os
 import csv
 import hashlib
+import hmac
+import sqlite3
+import tempfile
 import datetime
 import logging
 from typing import Dict, Any
+
+GENESIS_ROOT_SIGNATURE = "GENESIS_ROOT_CHAIN"
+
+
+def write_external_anchor(db_path: str, anchor_path: str, hmac_secret: str) -> str:
+    """
+    Scelle cryptographiquement la tête du journal d'audit SQLite dans un fichier d'ancre externe.
+    Utilise HMAC-SHA256 pour garantir l'inaltérabilité de la chaîne d'audit (Palier A - Réserve 6).
+    """
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Base SQLite introuvable: {db_path}")
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT sha256_signature FROM audit_trail_events ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+
+    if not row or not row[0]:
+        raise ValueError("Aucun événement d'audit trouvé pour sceller l'ancre externe.")
+
+    head_hash = str(row[0]).strip()
+    hmac_sig = hmac.new(hmac_secret.encode("utf-8"), head_hash.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    content = f"{head_hash}|{hmac_sig}\n"
+    anchor_dir = os.path.dirname(os.path.abspath(anchor_path))
+    if anchor_dir:
+        os.makedirs(anchor_dir, exist_ok=True)
+
+    # Écriture atomique avec fichier temporaire dans le même répertoire
+    temp_fd, temp_file = tempfile.mkstemp(dir=anchor_dir or None, prefix="anchor_", suffix=".tmp")
+    try:
+        with open(temp_fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, anchor_path)
+    finally:
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+
+    return head_hash
+
 
 class AuditTrail:
     """

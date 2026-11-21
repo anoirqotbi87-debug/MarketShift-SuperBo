@@ -28,6 +28,62 @@ class AccountInfo(BaseModel):
     margin_level: float
     currency: str
     server: str
+    trade_mode: int = -1
+
+    @property
+    def is_certified_demo(self) -> bool:
+        return self.trade_mode == 0
+
+class SystemReadiness:
+    """
+    Superviseur d'état et d'éligibilité opérationnelle globale (Palier A - Réserve 2).
+    """
+    _storage_ready: bool = True
+    _storage_reason: str = "Initial"
+    _engine_ready: bool = True
+    _engine_reason: str = "Initial"
+    _broker_ready: bool = True
+    _broker_reason: str = "Initial"
+
+    @classmethod
+    def set_storage_ready(cls, ready: bool, reason: str = "") -> None:
+        cls._storage_ready = bool(ready)
+        cls._storage_reason = str(reason)
+
+    @classmethod
+    def set_engine_ready(cls, ready: bool, reason: str = "") -> None:
+        cls._engine_ready = bool(ready)
+        cls._engine_reason = str(reason)
+
+    @classmethod
+    def set_broker_ready(cls, ready: bool, reason: str = "") -> None:
+        cls._broker_ready = bool(ready)
+        cls._broker_reason = str(reason)
+
+    @classmethod
+    def is_ready(cls) -> bool:
+        return cls._storage_ready and cls._engine_ready and cls._broker_ready
+
+    @classmethod
+    def get_status_summary(cls) -> Dict[str, Any]:
+        return {
+            "ready": cls.is_ready(),
+            "storage_ready": cls._storage_ready,
+            "storage_reason": cls._storage_reason,
+            "engine_ready": cls._engine_ready,
+            "engine_reason": cls._engine_reason,
+            "broker_ready": cls._broker_ready,
+            "broker_reason": cls._broker_reason
+        }
+
+    @classmethod
+    def reset(cls) -> None:
+        cls._storage_ready = True
+        cls._engine_ready = True
+        cls._broker_ready = True
+        cls._storage_reason = "Reset"
+        cls._engine_reason = "Reset"
+        cls._broker_reason = "Reset"
 
 class PositionInfo(BaseModel):
     ticket: int

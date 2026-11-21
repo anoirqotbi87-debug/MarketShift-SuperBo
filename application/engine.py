@@ -25,7 +25,7 @@ from agents.kill_switch import KillSwitch
 from agents.circuit_breaker import CircuitBreaker
 from risk.pretrade_validator import PreTradeValidator
 from risk.dynamic_trailing_stop import DynamicTrailingStop
-from core.interfaces import IBrokerConnector, OrderType, Signal
+from core.interfaces import IBrokerConnector, OrderType, Signal, SystemReadiness
 from core.news_filter import NewsFilter
 from infrastructure.config import Config
 from core.execution_metrics import execution_metrics
@@ -172,11 +172,54 @@ class Engine:
 
         self._last_signal_candle: Dict[str, datetime.datetime] = {}
 
+        self.is_ready: bool = True
+        self._check_sqlite_readiness()
+
         logging.info(
             f"[Engine] Initialisé avec {len(self.symbols)} symboles: {', '.join(self.symbols)}"
         )
 
+    def _check_sqlite_readiness(self) -> None:
+        """Vérifie l'intégrité et la disponibilité du stockage SQLite au démarrage (Palier A - Réserve 2)."""
+        import os
+        import sqlite3
+        db_path = getattr(Config, "SQLITE_DB_PATH", "bot_database.db")
+        is_ok = True
+        reason = "Stockage SQLite opérationnel"
+
+        if not os.path.exists(db_path):
+            is_ok = False
+            reason = f"Base SQLite inexistante au démarrage ({db_path})"
+        else:
+            try:
+                with sqlite3.connect(db_path, timeout=1.0) as conn:
+                    cur = conn.cursor()
+                    cur.execute("PRAGMA integrity_check;")
+                    row = cur.fetchone()
+                    if not row or row[0] != "ok":
+                        is_ok = False
+                        reason = f"Échec PRAGMA integrity_check SQLite: {row}"
+            except Exception as e:
+                is_ok = False
+                reason = f"Exception d'accès SQLite au démarrage: {e}"
+
+        if not is_ok:
+            self.is_ready = False
+            SystemReadiness.set_storage_ready(False, reason)
+            SystemReadiness.set_engine_ready(False, f"Engine verrouillé par défaut stockage ({reason})")
+            if hasattr(self, "kill_switch") and self.kill_switch:
+                self.kill_switch.activate(f"Fail-Closed démarrage: {reason}")
+            if self.connector is not None:
+                setattr(self.connector, "_has_indeterminate_primary_order", True)
+            logging.critical(f"[Engine] {reason} -> Fail-Closed activé.")
+        else:
+            SystemReadiness.set_storage_ready(True, "OK")
+            SystemReadiness.set_engine_ready(True, "OK")
+
     def start(self):
+        if not getattr(self, "is_ready", True):
+            raise RuntimeError("Fail-Closed: Engine refuses to start because storage or engine is not ready")
+
         # Démarrage du service d'alertes Telegram
         if self.notifier and hasattr(self.notifier, "start"):
             self.notifier.start()
@@ -1353,6 +1396,7 @@ class Engine:
                 and int(getattr(pos, 'magic', 0)) == expected_magic                                        # e)
                 and int(pos.ticket) not in pre_existing_tickets                                             # a)
                 and int(pos.ticket) not in self._known_position_tickets
+                and (payload.get('timeout_at') is None or getattr(pos, 'time', 0) >= float(payload.get('timeout_at')) - 10.0)
             ]
             # Critère f) : commentaire strict — omission/divergence = doute -> refus
             strict_matching = []
